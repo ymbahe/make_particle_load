@@ -19,40 +19,54 @@ comm_rank = comm.Get_rank()
 comm_size = comm.Get_size()
 
 class ParticleLoad:
+    """
+    Class to generate and save a particle load from an existing mask.
 
+    Parameters
+    ----------
+    param_file : str
+        The name of the YAML parameter file containing the settings for the
+        particle load creation.
+    randomize : bool, optional
+        ??? (default: False)
+    only_calc_ntot : bool, optional
+        ??? (default: False)
+    verbose : bool, optional
+        Switch to enable detailed log messages (default: False).
+
+    """
     def __init__(
-            self,
-            param_file: str,
-            randomize: bool = False,
-            only_calc_ntot: bool = False,
-            verbose: bool = False
+        self, param_file: str, randomize: bool = False,
+        only_calc_ntot: bool = False, verbose: bool = False
     ) -> None:
 
-        self.randomize = randomize
-        self.only_calc_ntot = only_calc_ntot
         self.verbose = verbose
 
-        # Think about later.
-        self.do_gadget = False
-        self.do_gadget4 = False
-        self.gadget_dir = None
-        self.gadget4_dir = None
+        # For now, hard-code SWIFT as only supported simulation type.
+        # Maybe add support for Gadget(/4) later.
+        self.sim_types = ['SWIFT']
 
         # Read the parameter file.
         self.read_param_file(param_file)
 
         # Generate particle load.
-        self.make_particle_load()
+        self.make_particle_load(only_calc_ntot=only_calc_ntot)
+
+        # Save.
+        if self.save_data:
+            self.save(randomize=randomize)
 
     def read_param_file(self, param_file: str) -> None:
-        """ Read in parameters for run. """
+        """Read in parameters for run."""
+
+        # Read params from YAML file on rank 0, then broadcast to other ranks.
         if comm_rank == 0:
-            params = yaml.load(open(param_file))
+            params = yaml.safe_load(open(param_file))
         else:
             params = None
         params = comm.bcast(params, root=0)
 
-        # Params that are required.
+        # Define and enforce required parameters.
         required_params = [
             'box_size',
             'n_particles',
@@ -61,15 +75,24 @@ class ParticleLoad:
             'panphasian_descriptor',
             'ndim_fft_start',
             'is_zoom',
-            'which_cosmology'
+            'cosmology'
         ]
-
         for att in required_params:
-            assert att in params.keys(), f'Need to have {att} as required parameter.'
+            if att not in params:
+                raise KeyError(f"Need to have {att} as required parameter.")
+
+        # *** Re-structure this: use dicts instead of flooding self space ***
 
         # Some dummy placers.
-        self.coords = np.array([0., 0., 0.])
+        self.mask = None
+
+        # Things of unclear nature
         self.radius = 0.
+        self.ic_params = {
+            'all_grid': False,
+            'n_species': 1
+        }
+
         self.mask_file = None  # Use a precomputed mask for glass particles.
         self.all_grid = False  # Only make from grids (no glass particles).
         self.n_species = 1  # Number of DM species.
@@ -150,7 +173,7 @@ class ParticleLoad:
         self.grid_also_glass = False 
         self.glass_files_dir = './glass_files/'
 
-        # Softening for zooms.
+        # Softening length for zooms, in units of mean inter-particle distance
         self.softening_ratio_background = 0.02  # 1/50 M-P-S.
 
         # Default GADGET executable.
@@ -178,42 +201,68 @@ class ParticleLoad:
         else:
             raise ValueError("Invalid cosmology")
 
-        # Make sure coords is numpy array.
+        # Make sure coords is a numpy array.
         self.coords = np.array(self.coords)
 
-        # Sanity check.
-        assert np.true_divide(self.n_particles, self.glass_num) % 1 < 1e-6, \
-            'Number of particles must divide into glass_num'
+        # Sanity check: number of particles must be an integer multiple of the
+        # glass file particle number.
+        if not (self.n_particles / self.glass_num) % 1 < 1e-6:
+            raise ValueError(
+                f"The number of particles ({self.n_particles}) must be an "
+                f"integer multiple of the number per glass file "
+                f"({self.glass_num})!")
 
     def compute_masses(self):
-        """ For the given cosmology, compute the total DM mass for the given volume. """
+        """
+        Compute the total and per-particle masses for the simulation volume.
+
+        The calculation takes the specified cosmology into account. All
+        particles are assigned equal masses, based on the box volume and
+        specified number of particles N_part.
+
+        For each particle, three mass types are computed:
+        - m_dmo: the mass appropriate for a DM-only simulation (i.e.
+            distributing the entire box mass over N_part particles).
+        - m_dm: the mass for dark matter particles (i.e. distributing the
+            fraction of total mass in dark matter over N_part particles).
+        - m_gas: the mass for gas particles (i.e. distributing the fraction
+            of total mass in baryons over N_part particles).
+
+        """
         if comm_rank == 0:
-            cosmo = FlatLambdaCDM(H0=self.HubbleParam * 100., Om0=self.Omega0, Ob0=self.OmegaBaryon)
-            rho_crit = cosmo.critical_density0.to(u.solMass / u.Mpc ** 3)
+            h = self.HubbleParam
+            cosmo = FlatLambdaCDM(
+                H0=h*100., Om0=self.Omega0, Ob0=self.OmegaBaryon)
+            rho_crit = cosmo.critical_density0.to(u.solMass / u.Mpc ** 3).value
+            omega_dm = self.Omega0 - self.OmegaBaryon
 
-            M_tot_dm_dmo = self.Omega0 * rho_crit.value * (self.box_size / self.HubbleParam) ** 3
-            M_tot_dm = (self.Omega0 - self.OmegaBaryon) \
-                       * rho_crit.value * (self.box_size / self.HubbleParam) ** 3
-            M_tot_gas = self.OmegaBaryon * rho_crit.value \
-                        * (self.box_size / self.HubbleParam) ** 3
+            box_volume = (self.box_size / h)**3
+            m_tot = self.Omega0 * rho_crit * box_volume
+            m_tot_dm = omega_dm * rho_crit * box_volume
+            m_tot_gas = self.OmegaBaryon * rho_crit * box_volume
 
-            dm_mass = M_tot_dm / self.n_particles
-            dm_mass_dmo = M_tot_dm_dmo / self.n_particles
-            gas_mass = M_tot_gas / self.n_particles
+            m_dm = m_tot_dm / self.n_particles
+            m_dmo = m_tot / self.n_particles
+            m_gas = m_tot_gas / self.n_particles
 
-            print('Dark matter particle mass (if DMO): %.3g Msol (%.3g 1e10 Msol/h)' \
-                  % (dm_mass_dmo, dm_mass_dmo * self.HubbleParam / 1.e10))
-            print('Dark matter particle mass: %.3g Msol (%.3g 1e10 Msol/h)' \
-                  % (dm_mass, dm_mass * self.HubbleParam / 1.e10))
-            print('Gas particle mass: %.3g Msol (%.3g 1e10 Msol/h)' % \
-                  (gas_mass, gas_mass * self.HubbleParam / 1.e10))
+            if self.verbose:
+                print(f"Dark matter only particle mass: {m_dmo:.3f} M_sun "
+                      f"(={m_dmo * h / 1e10:.3f} x 10^10 h^-1 M_sun)")
+                print(f"Dark matter particle mass: {m_dm:.3f} M_sun "
+                      f"(={m_dm * h / 1e10:.3f} x 10^10 h^-1 M_sun)")
+                print(f"Gas particle mass: {m_gas:.3f} M_Sun" 
+                      f"(={m_gas * h / 1e10:.3f} x 10^10 h^-1 M_Sun)")
         else:
-            M_tot_dm_dmo = None
-            gas_mass = None
+            m_tot = None
+            m_dm = None
+            m_gas = None
+            m_dmo = None
 
-        M_tot_dm_dmo = comm.bcast(M_tot_dm_dmo)
-        self.total_box_mass = M_tot_dm_dmo
-        self.gas_particle_mass = comm.bcast(gas_mass)
+        # Send masses to all MPI ranks and store as class attributes
+        self.m_tot = comm.bcast(m_tot)
+        self.m_dmo = comm.bcast(m_dmo)
+        self.m_dm = comm.bcast(m_dm)
+        self.m_gas = comm.bcast(m_gas)
 
     def init_high_res(self, offsets, cell_nos, L, max_boxsize):
         """ Initialize the high resolution grid with the primary high resolution particles. """
@@ -792,17 +841,19 @@ class ParticleLoad:
 
         self.compute_ic_cores_from_mem(nmaxpart, nmaxdisp, ndim_fft, all_ntot, optimal=True)
 
-    def make_particle_load(self):
+    def make_particle_load(self, only_calc_ntot):
+        """
+        Main driver function to generate the particle load.
 
+        """
         if comm_rank == 0:
             print('\n-------------------------')
             print('Generating particle load.')
             print('-------------------------\n')
 
-        # Get particle masses of high resolution particles.
+        # Get particle masses and softening lengths of high-res particles.
         self.compute_masses()
-        eps_dm, eps_baryon, eps_dm_physical, eps_baryon_physical = \
-            self.compute_softning(verbose=True)
+        eps = self.compute_softening(verbose=True)
 
         # Load mask file.
         if self.is_zoom: self.load_mask_file()
@@ -938,7 +989,7 @@ class ParticleLoad:
                    (4 * all_ntot * 8. / 1024. / 1024. / 1024.)))
             print('--- Num ranks needed for less than <max_particles_per_ic_file> = %.2f' % \
                   (np.true_divide(all_ntot, self.max_particles_per_ic_file)))
-        if self.only_calc_ntot:
+        if only_calc_ntot:
             sys.exit()
 
         # Initiate arrays.
@@ -1089,17 +1140,20 @@ class ParticleLoad:
         #                np.true_divide((1-max_x) + min_x, np.diff(np.unique(check_y))[0]))
 
         numtot = comm.allreduce(len(masses))
+
+        # Generate param and submit files. Currently, nothing is done here.
         if comm_rank == 0:
             self.save_param_files(max_boxsize)
             self.save_submit_files(max_boxsize)
         comm.barrier()
 
-        # Save.
-        if self.save_data: self.save(coords_x, coords_y, coords_z, masses)
 
-    def save_param_files(self, max_boxsize):
-        """ Create ic and gadget parameter files and submit scripts. """
+    def save_param_files(self):
+        """
+        Create IC-GEN and GADGET/SWIFT parameter files and submit scripts.
 
+        ** THIS IS NOT ACTUALLY DOING ANYTHING RIGHT NOW. **
+        """
         # Compute mass cut offs between particle types.
         hr_cut = 0.0
         lr_cut = 0.0
@@ -1117,7 +1171,7 @@ class ParticleLoad:
             i_z = 0
 
         # Get softenings.
-        eps_dm_h, eps_baryon_h, eps_dm_physical_h, eps_baryon_physical_h = self.compute_softning()
+        eps = self.compute_softening()
 
         # Build parameter list.
         param_dict = dict(
@@ -1137,12 +1191,12 @@ class ParticleLoad:
             high_res_L='%.8f'%self.high_res_L,
             high_res_n_eff=self.high_res_n_eff,
             panphasian_descriptor=self.panphasian_descriptor,
-            constraint_phase_descriptor=self.constraint_phase_descriptor,
-            constraint_phase_descriptor_path=self.constraint_phase_descriptor_path,
-            constraint_phase_descriptor_levels=self.constraint_phase_descriptor_levels,
-            constraint_phase_descriptor2=self.constraint_phase_descriptor2,
-            constraint_phase_descriptor_path2=self.constraint_phase_descriptor_path2,
-            constraint_phase_descriptor_levels2=self.constraint_phase_descriptor_levels2,
+            constraint_phase_descriptor="%dummy",
+            constraint_phase_descriptor_path="%dummy",
+            constraint_phase_descriptor_levels="%dummy",
+            constraint_phase_descriptor2="%dummy",
+            constraint_phase_descriptor_path2="%dummy",
+            constraint_phase_descriptor_levels2="%dummy",
             ndim_fft_start=self.ndim_fft_start,
             Omega0='%.8f'%self.Omega0,
             OmegaLambda='%.8f'%self.OmegaLambda,
@@ -1156,7 +1210,7 @@ class ParticleLoad:
             nbit=self.nbit,
             fft_times_fac=self.fft_times_fac,
             swift_ic_dir_loc=self.swift_ic_dir_loc,
-            eps_dm_h='%.8f'%eps_dm_h,
+            eps_dm_h=eps['dm']' d%.8f'%eps_dm_h,
             eps_baryon_h='%.8f'%eps_baryon_h,
             softening_ratio_background=self.softening_ratio_background,
             eps_dm_physical_h='%.8f'%eps_dm_physical_h,
@@ -1181,7 +1235,7 @@ class ParticleLoad:
             print('\n------ Saving ------')
             print('Saved ics param and submit file.')
 
-        if self.do_gadget4:
+        if 'gadget4' in self.sim_types:
             raise Exception("Think about DMO for gadget4")
             # Make GADGET4 param file.
             # make_param_file_gadget4(self.gadget4_dir, self.f_name, self.box_size,
@@ -1191,7 +1245,7 @@ class ParticleLoad:
             ## Makde GADGET4 submit file.
             # make_submit_file_gadget4(self.gadget4_dir, self.f_name)
 
-        if self.do_gadget:
+        if 'gadget' in self.sim_types:
             raise Exception("Think about DMO for gadget")
             # Make GADGET param file.
             # make_param_file_gadget(self.gadget_dir, self.f_name, self.box_size,
@@ -1209,50 +1263,64 @@ class ParticleLoad:
     def save_submit_files(self, max_boxsize):
 
         """ Generate submit files. """
-        if self.do_gadget:
+        if 'gadget' in self.sim_types:
             make_submit_file_gadget(self.gadget_dir, self.n_cores_gadget, self.f_name,
                                     self.n_species, self.gadget_exec)
             print('Saved gadget submit file.')
 
-    def compute_softning(self, verbose=False):
-        """ Compute softning legnths. """
+    def compute_softening(self, verbose=False) -> dict:
+        """
+        Compute softening lengths, in units of Mpc/h.
 
+        Returns
+        -------
+        eps : dict
+            A dictionary with four keys: 'dm' and 'baryon' contain the
+            co-moving softening lengths for DM and baryons (the latter is 0
+            for DM-only simulations). 'dm_proper' and 'baryon_proper' contain
+            the corresponding maximal proper softening lengths.
+        """
         if self.dm_only:
             comoving_ratio = 1 / 20.  # = 0.050
-            physical_ratio = 1 / 45.  # = 0.022
+            proper_ratio = 1 / 45.  # = 0.022
         else:
             comoving_ratio = 1 / 20.  # = 0.050
-            physical_ratio = 1 / 45.  # = 0.022
+            proper_ratio = 1 / 45.  # = 0.022
 
-        N = self.n_particles ** (1 / 3.)
-        mean_inter = self.box_size / N
+        # Compute mean inter-particle separation, in Mpc/h (recall that
+        # self.box_size is already in these units).
+        n_per_dimension = self.n_particles ** (1 / 3.)
+        mean_interparticle_separation = self.box_size / n_per_dimension
 
-        # DM 
-        eps_dm = mean_inter * comoving_ratio
-        eps_dm_physical = mean_inter * physical_ratio
+        # Softening lengths for DM
+        eps_dm = mean_interparticle_separation * comoving_ratio
+        eps_dm_proper = mean_interparticle_separation * proper_ratio
 
-        # Baryons
+        # Softening lengths for baryons
         if self.dm_only:
             eps_baryon = 0.0
-            eps_baryon_physical = 0.0
+            eps_baryon_proper = 0.0
         else:
-            fac = ((self.Omega0 - self.OmegaBaryon) / self.OmegaBaryon) ** (1. / 3)
+            # Adjust DM softening lengths according to baryon fraction
+            fac = ((self.Omega0 - self.OmegaBaryon) / self.OmegaBaryon)**(1./3)
             eps_baryon = eps_dm / fac
-            eps_baryon_physical = eps_dm_physical / fac
+            eps_baryon_proper = eps_dm_proper / fac
 
         if comm_rank == 0 and verbose:
+            h = self.HubbleParam
             if not self.dm_only:
-                print('Comoving Softenings: DM=%.6f Baryons=%.6f Mpc/h' % (
-                    eps_dm, eps_baryon))
-                print('Max phys Softenings: DM=%.6f Baryons=%.6f Mpc/h' % (
-                    eps_dm_physical, eps_baryon_physical))
-            print('Comoving Softenings: DM=%.6f Baryons=%.6f Mpc' % (
-                eps_dm / self.HubbleParam, eps_baryon / self.HubbleParam))
-            print('Max phys Softenings: DM=%.6f Baryons=%.6f Mpc' % (
-                eps_dm_physical / self.HubbleParam,
-                eps_baryon_physical / self.HubbleParam))
+                print(f"Comoving softenings: DM={eps_dm:.6f}, "
+                      f"baryons={eps_baryon:.6f} Mpc/h")
+                print(f"Max proper softenings: DM={eps_dm_proper:.6f}, "
+                      f"baryons={eps_baryon_proper:.6f} Mpc/h")
+            print(f"Comoving softenings: DM={eps_dm / h:.6f} Mpc, "
+                  f"baryond={eps_baryon / h:.6f} Mpc")
+            print(f"Max proper softenings: DM={eps_dm_proper / h:.6f} Mpc, "
+                  f"baryons={eps_baryon_proper / h:.6f} Mpc")
 
-        return eps_dm, eps_baryon, eps_dm_physical, eps_baryon_physical
+        eps = {'dm': eps_dm, 'baryon': eps_baryon,
+               'dm_proper': eps_dm_proper, 'baryon_proper': eps_baryon_proper}
+        return eps
 
     def com(self, coords_x, coords_y, coords_z, masses):
         """ Compute center of mass of a list of coords. """
@@ -1281,7 +1349,18 @@ class ParticleLoad:
         assert np.all(coords >= 0.0) and np.all(coords <= 1.0), 'Error uniform grid'
         return coords
 
-    def save(self, coords_x, coords_y, coords_z, masses):
+    def save(self, randomize=False):
+        """
+        Save the generated particle load to an HDF5 file.
+
+        This is an MPI-collective function.        
+
+        Parameters
+        ----------
+        randomize : bool
+            Switch to randomize something.
+
+        """
         ntot = comm.allreduce(len(masses))
         ntot_min = comm.allreduce(len(masses), op=MPI.MIN)
         ntot_max = comm.allreduce(len(masses), op=MPI.MAX)
@@ -1398,8 +1477,10 @@ class ParticleLoad:
         s.tofile(f)
         np.array([s.nbytes], dtype=np.int32).tofile(f)
 
-    def save_particle_load_as_binary(self, fname, coords_x, coords_y, coords_z, masses,
-            n_tot, nfile, nfile_tot):
+    def save_particle_load_as_binary(
+        self, fname, coords_x, coords_y, coords_z, masses, n_tot, nfile,
+        nfile_tot
+    ):
         f = FortranFile(fname, mode="w")
         # 4+8+4+4+4 = 24
         f.write_record(
