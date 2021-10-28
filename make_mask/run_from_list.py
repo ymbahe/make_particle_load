@@ -4,8 +4,8 @@ Script to batch process multiple haloes from one parent simulation.
 Run as:
 ```
 python3 run_from_list.py \
-   --template [name of parameter template file] \
-   --listfile [name of file containing the group numbers to process]
+   -t [name of parameter template file] \
+   -l [name of file containing the group numbers to process]
 ```
 """
 import argparse
