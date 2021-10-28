@@ -202,7 +202,7 @@ class ParticleLoad:
             raise ValueError("Invalid cosmology")
 
         # Make sure coords is a numpy array.
-        self.coords = np.array(self.coords)
+        self.centre = np.array(self.centre)
 
         # Sanity check: number of particles must be an integer multiple of the
         # glass file particle number.
@@ -274,7 +274,7 @@ class ParticleLoad:
             if self.mask_file is not None:
                 # Rescale mask coords into grid coords.
                 mask_cell_centers = self.mask_params['coords'] / max_boxsize * L
-                mask_cell_width = self.mask_params['grid_cell_width'] / max_boxsize * L
+                mask_cell_width = self.mask_params['cell_size'] / max_boxsize * L
                 assert np.all(mask_cell_centers >= -L/2.), 'Mask coords error'
                 assert np.all(mask_cell_centers+mask_cell_width <= L/2.), 'Mask coords error'
 
@@ -310,7 +310,7 @@ class ParticleLoad:
                 #    dists = np.linalg.norm(centers, axis=1)
                 #    if comm_rank == 0:
                 #        print('Sphere rad %.2f Mpc/h center %s Mpc/h (%.2f Grid cells)'\
-                #            %(self.radius, self.coords, self.radius_in_cells))
+                #            %(self.radius, self.centre, self.radius_in_cells))
                 #    mask = np.where(dists <= self.radius_factor*self.radius_in_cells)
                 #    cell_types[mask] = 0
                 #        
@@ -725,31 +725,57 @@ class ParticleLoad:
         return glass
 
     def load_mask_file(self):
-        """ Load mask file that outlines region. """
+        """
+        Load the (previously computed) mask file that defines the zoom region.
 
-        if self.mask_file is not None:
-            if comm_rank == 0:
-                self.mask_params = {}
-                print('\n------ Loading mask file ------')
-                f = h5py.File(self.mask_file, 'r')
-                self.mask_params['coords'] = np.array(f['Coordinates'][...], dtype='f8')
-                self.coords = f['Coordinates'].attrs.get("geo_centre")  # Center of high res.
-                self.mask_params['bounding_length'] \
-                        = f['Coordinates'].attrs.get("bounding_length")
-                self.mask_params['high_res_volume'] \
-                        = f['Coordinates'].attrs.get("high_res_volume")
-                self.mask_params['grid_cell_width'] = \
-                        f['Coordinates'].attrs.get("grid_cell_width")
-                f.close()
-                print('Loaded: %s' % self.mask_file)
-                print('Mask bounding length = %s Mpc/h' % self.mask_params['bounding_length'])
-            else:
-                self.mask_params = None
-                self.coords = None
-            self.mask_params = comm.bcast(self.mask_params)
-            self.coords = comm.bcast(self.coords)
+        This is only relevant for zoom simulations. The mask file should have
+        been generated with the `MakeMask` class in `make_mask/make_mask.py`.
+
+        An error is raised if no mask file is specified or if the specified
+        file does not exist.
+
+        """
+        if comm_rank == 0:
+            if self.mask_file is None:
+                raise AttributeError(
+                    "You need to specify a mask file for a zoom simulation!"
+                )
+            if os.path.isfile(self.mask_file):
+                raise OSError(
+                    f"The specified mask file '{self.mask_file}' does not "
+                    "exist!"
+                )
+        # Load data on rank 0 and then distribute to other MPI ranks
+        if comm_rank == 0:
+            print('\n------ Loading mask file ------')
+            mask_data = {}
+            with h5.File(self.mask_file, 'r') as f:
+                
+                # Centre of the high-res zoom in region
+                centre = np.array(f['Coordinates'].attrs.get("geo_centre"))
+
+                # Data specifying the mask for the high-res region
+                mask_data['cell_coordinates'] = np.array(
+                    f['Coordinates'][...], dtype='f8')
+                mask_data['cell_size'] = (
+                    f['Coordinates'].attrs.get("grid_cell_width"))
+
+                # Also load the side length of the cube enclosing the mask,
+                # and the volume of the target high-res region (at the
+                # selection redshift).                
+                mask_data['extent'] = (
+                    f['Coordinates'].attrs.get("bounding_length"))
+                mask_data['high_res_volume'] = (
+                    f['Coordinates'].attrs.get("high_res_volume"))
+            print(f"Finished loading data from {self.mask_file}.")
+            print(f"   (bounding side = {mask_data['extent']:.3f} Mpc/h).")
+
         else:
-            raise Exception("Test this")
+            mask_data = None
+            centre = None
+
+        self.mask_data = comm.bcast(mask_data)
+        self.centre = comm.bcast(centre)
 
     def compute_fft_stats(self, max_boxsize, all_ntot):
         """ Work out what size of FFT grid we need for the IC gen. """
@@ -762,7 +788,7 @@ class ParticleLoad:
                 assert self.high_res_L < self.box_size, 'Zoom buffer region too big'
                 self.high_res_n_eff \
                         = int(self.n_particles * (self.high_res_L**3./self.box_size**3.))
-            print('--- HRgrid c=%s L_box=%.2f Mpc/h'%(self.coords, self.box_size))
+            print('--- HRgrid c=%s L_box=%.2f Mpc/h'%(self.centre, self.box_size))
             print('--- HRgrid L_grid=%.2f Mpc/h n_eff=%.2f**3 (x2=%.2f**3) FFT buff frac= %.2f'\
                     %(self.high_res_L, self.high_res_n_eff**(1/3.),
                         2.*self.high_res_n_eff**(1/3.), self.ic_region_buffer_frac))
@@ -852,11 +878,14 @@ class ParticleLoad:
             print('-------------------------\n')
 
         # Get particle masses and softening lengths of high-res particles.
+        # **TODO** check whether softenings are actually required...
         self.compute_masses()
-        eps = self.compute_softening(verbose=True)
+        self.softenings = self.compute_softening(verbose=True)
 
         # Load mask file.
-        if self.is_zoom: self.load_mask_file()
+        # **TODO**: add option to directly pass in mask dict to class
+        if self.is_zoom:
+            self.load_mask_file()
 
         # |----------------------------------------|
         # | First compute the high resolution grid |
@@ -876,7 +905,7 @@ class ParticleLoad:
 
             # Dimensions of high resolution grid in glass cells.
             n_cells_high = \
-                    np.tile(int(np.ceil(self.mask_params['bounding_length'] / cell_length)), 3)
+                    np.tile(int(np.ceil(self.mask_params['extent'] / cell_length)), 3)
             n_cells_high += self.glass_buffer_cells * 2
             assert np.all(n_cells_high < n_cells), 'To many cells'
 
@@ -893,7 +922,7 @@ class ParticleLoad:
         if self.is_zoom:
             # Number of cells that cover bounding region.
             self.radius_in_cells =\
-                    np.true_divide(self.mask_params['bounding_length'], cell_length)
+                    np.true_divide(self.mask_params['extent'], cell_length)
 
             # Make sure grid can accomodate the radius factor.
             # if self.is_slab == False:
@@ -1099,8 +1128,8 @@ class ParticleLoad:
                       % (final_tot_num, final_tot_num ** (1 / 3.)))
 
         # Wrap coords to chosen center.
-        wrap_coords = self.rescale(self.coords, 0, self.box_size, 0, 1.0)
-        if comm_rank == 0: print('Lagrangian COM of high res region = %s' % self.coords)
+        wrap_coords = self.rescale(self.centre, 0, self.box_size, 0, 1.0)
+        if comm_rank == 0: print('Lagrangian COM of high res region = %s' % self.centre)
         coords_x = np.mod(coords_x + wrap_coords[0] + 1., 1.0)
         coords_y = np.mod(coords_y + wrap_coords[1] + 1., 1.0)
         coords_z = np.mod(coords_z + wrap_coords[2] + 1., 1.0)
@@ -1185,9 +1214,9 @@ class ParticleLoad:
             starting_z='%.8f'%self.starting_z,
             finishing_z='%.8f'%self.finishing_z,
             n_particles=self.n_particles,
-            coords_x='%.8f'%self.coords[0],
-            coords_y='%.8f'%self.coords[1],
-            coords_z='%.8f'%self.coords[2],
+            coords_x='%.8f'%self.centre[0],
+            coords_y='%.8f'%self.centre[1],
+            coords_z='%.8f'%self.centre[2],
             high_res_L='%.8f'%self.high_res_L,
             high_res_n_eff=self.high_res_n_eff,
             panphasian_descriptor=self.panphasian_descriptor,
@@ -1434,7 +1463,7 @@ class ParticleLoad:
                     g.attrs.create('itot', ntot)
                     g.attrs.create('nj', comm_rank)
                     g.attrs.create('nfile', comm_size)
-                    g.attrs.create('coords', self.coords/self.box_size)
+                    g.attrs.create('coords', self.centre/self.box_size)
                     g.attrs.create('radius', self.radius/self.box_size)
                     g.attrs.create('cell_length', self.cell_length/self.box_size)
                     g.attrs.create('Redshift', 1000)
