@@ -6,7 +6,7 @@ mask_file:           path/to/output/mask/my_run_mask.hdf5
 
 # PARTICLE LOAD DEPOSITION #
 f_name:              my_run                 # The save name for the initial conditions output file
-which_cosmology:     Planck2018             # Tha cosmology scheme used in Panphasia and in the ICs hdf5 file
+cosmology:           Planck2018             # The cosmology scheme used in Panphasia and in the ICs hdf5 file
 is_zoom:             1                      # Enter 1 if it is a zoom simulations, 0 otherwise
 n_species:           2                      # Number of particle species (2 for zooms: high-res and low-res)
 box_size:            202.98                 # Enter box-size in units of Mpc/h (h must be consistent with cosmology used)
