@@ -156,7 +156,7 @@ class ParticleLoad:
         self.ic_dir = './ic_gen_output/'
 
         # Params for hi res grid.
-        self.nq_mass_reduce_factor  = 0.5.      # Mass of first nq level relative to grid
+        self.nq_mass_reduce_factor  = 0.5       # Mass of first nq level relative to grid
         self.zone3_ncell_factor     = 0.5       # Number of cells in Zone III shells compared to lowest-res in gcube
         self.skin_reduce_factor     = 8.        # What successive factors do high res skins reduce by
         self.min_num_per_cell       = 8         # Min number of particles in high res cell (must be cube).
@@ -786,7 +786,7 @@ class ParticleLoad:
 
         return self.scube['num_part']
 
-    def prepare_gcube_particles(self, gcell_types)
+    def prepare_gcube_particles(self, gcell_types):
         """ 
         Work out how to populate gcells with particles.
 
@@ -1758,7 +1758,7 @@ class ParticleLoad:
             nbit=self.nbit,
             fft_times_fac=self.fft_times_fac,
             swift_ic_dir_loc=self.swift_ic_dir_loc,
-            eps_dm_h=eps['dm']' d%.8f'%eps_dm_h,
+            eps_dm_h='d%.8f'%eps_dm_h,
             eps_baryon_h='%.8f'%eps_baryon_h,
             softening_ratio_background=self.softening_ratio_background,
             eps_dm_physical_h='%.8f'%eps_dm_physical_h,
@@ -2023,8 +2023,9 @@ class ParticleLoad:
                     self.save_local_particles_as_binary(fortran_loc)
 
                 if self.verbose:
-                print(f"[Rank {comm_rank}] Finished saving {n_part} local "
-                      "particles.")
+                    print(
+                        f"[Rank {comm_rank}] Finished saving {n_part} local "
+                         "particles.")
 
             # Make all ranks wait so that we don't have too many writing
             # at the same time.
