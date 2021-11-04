@@ -20,7 +20,7 @@ pyximport.install(
     setup_args={"include_dirs":np.get_include()},
     reload_support=True
 )
-import MakeGrid as cy
+import auxiliary_tools as cy
 
 comm = MPI.COMM_WORLD
 comm_rank = comm.Get_rank()

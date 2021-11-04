@@ -96,7 +96,7 @@ cdef _assign_mask_cells(
 
     """
     cdef int num_gcells = len(gcell_types)
-    cdef long num_mask_cells = len(mask_cpos)
+    cdef long num_mask_cells = len(mask_pos)
     cdef long ii, jj
     cdef double half_mcell = mask_cell_width / 2.
 
@@ -148,7 +148,7 @@ cdef _find_skin_cells(
 
     cdef ind_seed_gcells = np.where(cell_types == cell_type)[0]
 
-    if len(mask) == 0:
+    if len(ind_seed_gcells) == 0:
         return []
     else:
         for this_idx in ind_seed_gcells:
@@ -174,11 +174,11 @@ cdef _find_skin_cells(
             count += 1
 
         # Fish out actually used array entries (we allocated the max possible)
-        ind_assigned = np.where(skin_cells != -1)[0]
-        if len(mask) == 0:
+        ind_assigned = np.nonzero(skin_cells != -1)[0]
+        if len(ind_assigned) == 0:
             return []
         else:
-            return np.unique(skin_cells[mask])
+            return np.unique(skin_cells[ind_assigned])
 
 cdef gen_layered_particles_slab(double slab_width, double boxsize, int nq, int nlev, double dv,
         int comm_rank, int comm_size, int n_tot_lo, int n_tot_hi,
@@ -369,7 +369,7 @@ cdef _fill_gcells_with_particles(
     ndarray[float64_t, ndim=2] coords_parts,
     ndarray[float64_t, ndim=1] mass_parts,
     float mass,
-    long offset
+    long particle_offset
     ):
     """
     Fill the (local) gcells of one type with particles.
@@ -389,7 +389,7 @@ cdef _fill_gcells_with_particles(
         This array is only used for output.
     mass : float
         The mass to assign to each particle.
-    offset : long
+    part_offset : long
         The index of the first particle to generate here, in the full array.
 
 
@@ -401,7 +401,7 @@ cdef _fill_gcells_with_particles(
     -----
     Although it would be trivial to do this through plain numpy array
     operations, we use a direct loop approach here to avoid memory overheads
-    (particle coordinates are directly written to the output array).
+    (particle coordinates can be written directly to the output array).
 
     Examples
     --------
@@ -426,9 +426,10 @@ cdef _fill_gcells_with_particles(
 
     for ii in range(n_gcells):
         for jj in range(np_kernel):
-            ind = part_offset + count
+            ind = particle_offset + count
             for kk in range(3):
-                coords_parts[ind, kk] = offsets[ii, kk] + coords_kernel[jj, kk]
+                coords_parts[ind, kk] = (gcell_centres[ii, kk] +
+		                         coords_kernel[jj, kk])
                 mass_parts[ind] = mass
             count += 1
 
