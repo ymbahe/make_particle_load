@@ -22,10 +22,22 @@ def my_alltoallv(sendbuf, send_count, send_offset, recvbuf, recv_count, recv_off
                               recvbuf[roff:roff+rc], rank, 0)
 
 def repartition(arr, ndesired, comm, comm_rank, comm_size):
-    """ Return the input arr repartitioned between processors. """
+    """
+    Return the input arr repartitioned across MPI ranks.
 
-    # Make sure input is an array
-    arr = np.ascontiguousarray(arr)
+    Parameters
+    ----------
+    arr : ndarray
+        The input array; must be 1-dimensional.
+    ndesired : ndarray(int)
+
+    ** TO CONTINUE **
+
+    """
+
+    # Make sure input is a contiguous array
+    if not arr.flags['C_CONTIGUOUS']:
+        arr = np.ascontiguousarray(arr)
 
     # Sanity checks on input arrays
     if len(arr.shape) != 1:
