@@ -10,9 +10,17 @@ from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
 from mpi4py import MPI
 from ParallelFunctions import repartition
-import MakeGrid as cy
+#import MakeGrid as cy
 from MakeParamFile import *
 from scipy.io import FortranFile
+
+import numpy as np
+import pyximport
+pyximport.install(
+    setup_args={"include_dirs":np.get_include()},
+    reload_support=True
+)
+import MakeGrid as cy
 
 comm = MPI.COMM_WORLD
 comm_rank = comm.Get_rank()
@@ -2031,6 +2039,9 @@ class ParticleLoad:
         num_part_min = comm.allreduce(num_part_local, op=MPI.MIN)
         num_part_max = comm.allreduce(num_part_local, op=MPI.MAX)
 
+        # ** TODO **: move this to separate function prior to particle
+        # generation. That way, we can immediately build the coordinate
+        # arrays with the final size (if > locally generated size).
         num_part_desired = np.zeros(comm_size, dtype=int)
         num_part_desired = (num_part_global // comm_size).astype(int)
         num_part_allocated = np.sum(num_part_desired)
