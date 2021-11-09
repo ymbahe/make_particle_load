@@ -1,110 +1,138 @@
+"""
+Collection of functions to create parameter and submit files consistent with
+the generated particle load, for IC-Gen, SWIFT, and/or Gadget3/4.
+"""
+
 import re
 import os
 import subprocess
 from string import Template
+from shutil import copy
 
-# |----------------------------------------|
-# | Make submit and param file for IC gen. |
-# |----------------------------------------|
+# -------------------- Main public functions -------------------------------
 
-def make_submit_file_ics(params):
-    """ Make slurm submission script for icgen. """
+def make_all_param_files(params, codes):
+    """Wrapper to generate all required param files."""
+    if 'icgen' in codes:
+        make_param_file_for_icgen(params)
+    if 'swift' in codes:
+        make_param_file_for_swift(params)
+    if 'gadget3' in codes:
+        make_param_file_for_gadget3(params)
+    if 'gadget4' in codes:
+        make_param_file_for_gadget4(params)
+
+ 
+def make_all_submit_files(params, codes):
+    """Wrapper to generate all required submit files."""
+    if 'icgen' in codes:
+        make_submit_file_for_icgen(params)
+    if 'swift' in codes:
+        make_submit_file_for_swift(params)
+    if 'gadget3' in codes:
+        make_submit_file_for_gadget3(params)
+    if 'gadget4' in codes:
+        make_submit_file_for_gadget4(params)
+
+
+# ---------------- Functions for individual target codes ---------------------
+
+# .............................. IC-GEN ......................................
+
+def make_submit_file_for_icgen(params):
+    """Make slurm submission script for IC-Gen."""
 
     # Make folder if it doesn't exist.
-    ic_gen_dir = '%s/ic_gen_submit_files/%s/'%(params['ic_dir'],params['f_name'])
-    if not os.path.exists(ic_gen_dir): os.makedirs(ic_gen_dir)
+    icgen_dir = f"{params['icgen_dir']}/ic_gen_submit_files/{params['f_name']}"
+    create_dir_if_needed(icgen_dir)
 
-    # Replace template values.
-    with open('./templates/ic_gen/submit', 'r') as f:
-        src = Template(f.read())
-        result = src.substitute(params)
+    make_custom_copy('./templates/ic_gen/submit', f"{icgen_dir}/submit.sh",
+                         params, executable=True)
+    print("Generated submit file for IC-Gen.")
 
-    # Write new param file.
-    with open('%s/submit.sh'%(ic_gen_dir), 'w') as f:
-        f.write(result)
+def make_param_file_for_icgen(params):
+    """Make a parameter file for IC-Gen."""
 
-    # Change execution privileges (make file executable by group)
-    # Assumes the files already exist. If not, it has no effect.
-    os.chmod(f"{ic_gen_dir}/submit.sh", 0o744)
+    icgen_dir = f"{params['icgen_dir']}/ic_gen_submit_files/{params['f_name']}"
 
-def make_param_file_ics(params):
-    """ Make parameter file for icgen. """
+    # Make output folder for the ICs (should already be done in main code!)
+    icgen_output_dir = (
+        f"{params['icgen_dir']}/ic_gen_submit_files/{params['f_name']}/ICs/")
+    create_dir_if_needed(icgen_output_dir)
 
-    # Make folder if it doesn't exist.
-    ic_gen_dir = '%s/ic_gen_submit_files/%s/'%(params['ic_dir'],params['f_name'])
-    if not os.path.exists(ic_gen_dir): os.makedirs(ic_gen_dir) 
-
-    # Make output folder for the Ics.
-    ic_gen_output_dir = '%s/ic_gen_submit_files/%s/ICs/'%(params['ic_dir'],params['f_name'])
-    if not os.path.exists(ic_gen_output_dir): os.makedirs(ic_gen_output_dir)
-
-    # Minimum FFT grid that fits 2x the nyquist frequency.
-    ndim_fft = params['ndim_fft_start']
-    N = (params['high_res_n_eff'])**(1./3) if params['is_zoom'] else (params['n_particles'])**(1/3.) 
-    while float(ndim_fft)/float(N) < params['fft_times_fac']:
-        ndim_fft *= 2
-    print("Using ndim_fft = %d" % ndim_fft)
-    params['ndim_fft'] = ndim_fft
-
-    # What are the phase descriptors?
-    if params['constraint_phase_descriptor'] != '%dummy':
-        if params['constraint_phase_descriptor2'] != '%dummy':
-            params['is_constraint'] = 2
+    # What are the constraint phase descriptors?
+    if params['icgen_constraint_phase_descriptor'] != '%dummy':
+        if params['icgen_constraint_phase_descriptor2'] != '%dummy':
+            params['icgen_is_constraint'] = 2
         else:
-            params['is_constraint'] = 1
+            params['icgen_is_constraint'] = 1
     else:
-        params['is_constraint'] = 0
-    params['constraint_path'] = '%dummy' if params['constraint_phase_descriptor'] == '%dummy' else\
-            "'%s'"%params['constraint_phase_descriptor_path']
-    params['constraint_path2'] = '%dummy' if params['constraint_phase_descriptor2'] == '%dummy' else\
-            "'%s'"%params['constraint_phase_descriptor_path2']
+        params['icgen_is_constraint'] = 0
 
-    # Is this a zoom simulation (zoom can't use 2LPT)?
+    if params['icgen_constraint_phase_descriptor'] == '%dummy':
+        params['icgen_constraint_phase_descriptor_path'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor_levels'] = '%dummy'   
+    if params['icgen_constraint_phase_descriptor2'] == '%dummy':
+        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'   
+
+    # Is this a zoom simulation? Then we cannot use 2LPT
     if params['is_zoom']:
         if params['is_slab']:
-            params['two_lpt'] = 1
-            params['multigrid'] = 0
+            params['icgen_2lpt'] = 1
+            params['icgen_is_multigrid'] = 0
         else:
-            params['two_lpt'] = 0 if params['multigrid_ics'] else 1
-            params['multigrid'] = 1 if params['multigrid_ics'] else 0
+            params['icgen_2lpt_type'] = 0 if params['multigrid_ics'] else 1
+            params['icgen_is_multigrid'] = 1 if params['multigrid_ics'] else 0
     else:
-        params['high_res_L'] = 0.0
-        params['high_res_n_eff'] = 0
-        params['two_lpt'] = 1 
-        params['multigrid'] = 0
+        params['icgen_highres_l_mpchi'] = 0.0
+        params['icgen_highres_n_eff'] = 0
+        params['icgen_2lpt_type'] = 1 
+        params['icgen_is_multigrid'] = 0
 
-    # Use peano hilbert indexing?
-    params['use_ph'] = 2 if params['use_ph_ids'] else 1
+    # Use Peano-Hilbert indexing?
+    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1   
 
-    # Cube of neff
-    params['high_res_n_eff_cube'] = round(params['high_res_n_eff']**(1./3))
+    make_custom_copy(
+        './templates/ic_gen/params.inp', f"{icgen_dir}/params.inp", params)
 
-    # Replace template values.
-    with open('./templates/ic_gen/params.inp', 'r') as f:
-        src = Template(f.read())
-        result = src.substitute(params)
+    print("Generated parameter file for IC-Gen.")
 
-    # Write new param file.
-    with open('%s/params.inp'%(ic_gen_dir), 'w') as f:
-        f.write(result)
+# .............................. SWIFT ......................................
 
-# |-------------------------------------------|
-# | Make submit and parameter file for SWIFT. |
-# |-------------------------------------------|
+def make_submit_file_for_swift(params):
+    """Make a SLURM submission script file for SWIFT."""
 
-def make_param_file_swift(params):
+    run_dir = f"{params['swift_dir']}/{params['f_name']}"
+    create_dir_if_needed(run_dir)
 
-    # Make data dir.
-    data_dir = params['swift_dir'] + '%s/'%params['f_name']
-    if not os.path.exists(data_dir): os.makedirs(data_dir)
-    if not os.path.exists(data_dir + 'out_files/'): os.makedirs(data_dir + 'out_files/')
+    submit_template = f"./templates/swift/{params['sim_type'].lower()}/submit"
+    resub_template = f"./templates/swift/{params['sim_type'].lower()}/resubmit"
 
-    # Starting and finishing scale factors.
-    params['starting_a'] = 1./(1+float(params['starting_z']))
-    params['finishing_a'] = 1./(1+float(params['finishing_z']))
+    make_custom_copy(
+        submit_template, f"{run_dir}/submit", params, executable=True)
+    make_custom_copy(
+        resub_template, f"{run_dir}/resubmit", params, executable=True)
+
+    # Also create (executable) auto-resubmit script
+    with open(f"{run_dir}/auto_resubmit", 'w') as f:
+        f.write('sbatch resubmit')
+    os.chmod(f"{run_dir}/auto_resubmit", 0o744)
+
+    print("Generated submit file for SWIFT.")
+
+
+def make_param_file_for_swift(params):
+    """Make a parameter file for SWIFT."""
+
+    sim_type = params['sim_type'].lower()
+
+    # Make the run and output directories
+    run_dir = f"{params['swift_dir']}/{params['f_name']}"
+    create_dir_if_needed(run_dir + '/out_files')
 
     # Replace values.
-    if 'tabula_' in params['template_set'].lower():
+    if 'tabula_' in sim_type:
         raise Exception("Fix this one")
         #r = ['%.5f'%h, '%.8f'%starting_a, '%.8f'%finishing_a, '%.8f'%omega0, '%.8f'%omegaL,
         #'%.8f'%omegaB, fname, fname, '%.8f'%(eps_dm/h),
@@ -113,16 +141,26 @@ def make_param_file_swift(params):
 
         #subprocess.call("cp ./templates/swift/%s/select_output.yml %s"%\
         #        (template_set, data_dir), shell=True)
-    elif params['template_set'].lower() == 'sibelius':
-        # Copy over select output.
-        subprocess.call("cp ./templates/swift/%s/select_output.yml %s"%\
-                (params['template_set'], data_dir), shell=True)
+    elif sim_type == 'sibelius':
+        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"./templates/swift/{sim_type}/stf_times_a.txt",
+             f"{run_dir}/snapshot_times.txt")
 
-        # Copy over snapshots times.
-        subprocess.call("cp ./templates/swift/%s/stf_times_a.txt %s/snapshot_times.txt"%\
-                (params['template_set'], data_dir), shell=True)
-    elif params['template_set'].lower() == 'eaglexl':
-        raise Exception("Fix this one")
+    elif sim_type == 'eaglexl':
+        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"./templates/swift/{sim_type}/output_times_a.txt",
+             f"{run_dir}/snapshot_times.txt")
+
+    elif sim_type == 'colibre':
+        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"./templates/swift/{sim_type}/output_times_a.txt",
+             f"{run_dir}/snapshot_times.txt")
+
+    elif sim_type == 'dmo':
+        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"./templates/swift/{sim_type}/output_times.txt",
+             f"{run_dir}/snapshot_times.txt")
+
         #split_mass = gas_particle_mass / 10**10. * 4.
         #r = [fname, '%.5f'%h, '%.8f'%starting_a, '%.8f'%finishing_a, '%.8f'%omega0, '%.8f'%omegaL,
         #'%.8f'%omegaB, fname, '%.8f'%(eps_dm/h),
@@ -130,50 +168,78 @@ def make_param_file_swift(params):
         #'%.8f'%(eps_baryon_physical/h), '%.3f'%(softening_ratio_background), 
         #'%.8f'%split_mass, ic_dir, fname]
     else:
+        set_trace()
         raise ValueError("Invalid template set")
 
-    t_file = './templates/swift/%s/params.yml'%params['template_set']
+    make_custom_copy(f"./templates/swift/{sim_type}/params.yml",
+                     f"{run_dir}/params.yml", params)
+    print("Generated parameter file for SWIFT.")
 
-    # Replace template values.
-    with open(t_file, 'r') as f:
+
+# ........................... GADGET-3 .......................................
+
+def make_submit_file_for_gadget3(params):
+    """Make a SLURM submission script file for GADGET-3."""
+    raise Exception("GADGET-3 submission files not yet implemented.")
+
+def make_param_file_for_gadget3(params):
+    """Make a SLURM submission script file for GADGET-3."""
+    raise Exception("GADGET-3 parameter files not yet implemented.")
+
+
+# ............................. GADGET-4 ....................................
+
+def make_submit_file_for_gadget4(params):
+    """Make a SLURM submission script file for GADGET-4."""
+    raise Exception("GADGET-4 submission files not yet implemented.")
+
+def make_param_file_for_gadget4(params):
+    """Make a SLURM submission script file for GADGET-4."""
+    raise Exception("GADGET-4 parameter files not yet implemented.")
+
+
+# ===================== Low-level utility functions =========================
+
+def make_custom_copy(source, target, params, executable=False):
+    """
+    Create a customized copy of a template file with the provided values.
+
+    Parameters
+    ----------
+    source : str
+        The path to the source (template) file. Customizable parameters must
+        be preceded with a '$', and must have a corresponding key in params.
+    target : str
+        The path to the to-be-created customized copy of source.
+    params : dict
+        Dict containing the values for customizable parameters (keys that
+        do not correspond to an entry in the source file are ignored).
+    executable : bool
+        Switch to make the output file executable (default: False).
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    See https://docs.python.org/3/library/string.html#template-strings for a
+    detailed description of the substitution rules.
+
+    """
+    # Read and adjust input file, using values from `params`.
+    with open(source, 'r') as f:
         src = Template(f.read())
-        result = src.substitute(params)
+        customized_copy = src.substitute(params)
 
-    # Write new param file.
-    with open('%s/params.yml'%(data_dir), 'w') as f:
-        f.write(result)
+    # Write the customized file.
+    with open(target, 'w') as f:
+        f.write(customized_copy)
 
-def make_submit_file_swift(params):
+    if executable:
+        os.chmod(target, 0o744)
 
-    data_dir = params['swift_dir'] + '%s/'%params['f_name']
-    if not os.path.exists(data_dir): os.makedirs(data_dir)
-
-    s_file = './templates/swift/%s/submit'%params['template_set'].lower()
-    rs_file = './templates/swift/%s/resubmit'%params['template_set'].lower()
-
-    # Replace template values.
-    with open(s_file, 'r') as f:
-        src = Template(f.read())
-        result = src.substitute(params)
-
-    # Write new param file.
-    with open('%s/submit'%(data_dir), 'w') as f:
-        f.write(result)
-
-    # Replace template values.
-    with open(rs_file, 'r') as f:
-        src = Template(f.read())
-        result = src.substitute(params)
-
-    # Write new param file.
-    with open('%s/resubmit'%(data_dir), 'w') as f:
-        f.write(result)
-
-    with open('%s/auto_resubmit'%data_dir, 'w') as f:
-        f.write('sbatch resubmit')
-
-    # Change execution privileges (make files executable by group)
-    # Assumes the files already exist. If not, it has no effect.
-    os.chmod(f"{data_dir}/submit", 0o744)
-    os.chmod(f"{data_dir}/resubmit", 0o744)
-    os.chmod(f"{data_dir}/auto_resubmit", 0o744)
+def create_dir_if_needed(path):
+    """Create a specified directory and its parents if it does not exist."""
+    if not os.path.exists(path):
+        os.makedirs(path)
