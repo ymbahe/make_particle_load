@@ -22,7 +22,7 @@ def make_all_param_files(params, codes):
     if 'gadget4' in codes:
         make_param_file_for_gadget4(params)
 
- 
+
 def make_all_submit_files(params, codes):
     """Wrapper to generate all required submit files."""
     if 'icgen' in codes:
