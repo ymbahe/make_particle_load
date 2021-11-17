@@ -6,12 +6,14 @@ is_zoom:             True   # Is this a zoom simulation?
 mask_file:           path/to/output/mask/my_run_mask.hdf5   # The mask file to use as an input, if this is a zoom simulation.
 
 # PARTICLE LOAD PARAMETERS #
-f_name:              my_run                 # The save name for the initial conditions output file
+sim_name:            my_run                 # The save name for the initial conditions output file
 cosmology:           Planck2018             # The cosmology scheme used in Panphasia and in the ICs hdf5 file
-n_species:           2                      # Number of particle species (2 for zooms: high-res and low-res)
+num_species:         2                      # Number of particle species (2 for zooms: high-res and low-res)
 box_size:            202.98                 # Enter box-size in units of Mpc/h (h must be consistent with cosmology used). Not needed if this is specified in the mask file.
-n_particles:         11466731375            # Number of particles if whole box was at target resolution
-glass_num:           1331                   # Number of particles in glass file to use for target resolution region
+#uniform_particle_number:     11466731375            # Number of particles if whole box was at target resolution
+target_mass:                1e7 
+zone1_gcell_load:           1331                   # Number of particles in glass file to use for target resolution region
+output_dir:            /path/to/save/particle/load/
 
 # PANPHASIA SET-UP #
 ic_dir:              /path/to/cloned/Panphasia/repository/ic_gen/run/
