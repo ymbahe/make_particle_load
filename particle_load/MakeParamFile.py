@@ -78,12 +78,8 @@ def make_param_file_for_icgen(params):
 
     # Is this a zoom simulation? Then we cannot use 2LPT
     if params['is_zoom']:
-        if params['is_slab']:
-            params['icgen_2lpt'] = 1
-            params['icgen_is_multigrid'] = 0
-        else:
-            params['icgen_2lpt_type'] = 0 if params['multigrid_ics'] else 1
-            params['icgen_is_multigrid'] = 1 if params['multigrid_ics'] else 0
+        params['icgen_2lpt_type'] = 0 if params['icgen_multigrid'] else 1
+        params['icgen_is_multigrid'] = 1 if params['icgen_multigrid'] else 0
     else:
         params['icgen_highres_l_mpchi'] = 0.0
         params['icgen_highres_n_eff'] = 0

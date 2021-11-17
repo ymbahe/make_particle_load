@@ -1862,6 +1862,7 @@ class ParticleLoad:
         for key_suffix in ['', '2', '_path', '_levels', '2_path', '2_levels']:
             param_dict[f'icgen_constraint_phase_descriptor{key_suffix}'] = (
             extra_params[f'icgen_constraint_phase_descriptor{key_suffix}'])
+        param_dict['icgen_multigrid'] = extra_params['icgen_multigrid']
         param_dict['icgen_n_fft_mesh'] = fft_params['n_mesh']
         param_dict['icgen_highres_num_eff'] = fft_params['num_eff']
         param_dict['icgen_highres_n_eff'] = fft_params['num_eff']**(1/3)
