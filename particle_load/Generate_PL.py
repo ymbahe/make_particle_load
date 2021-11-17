@@ -73,12 +73,10 @@ class ParticleLoad:
 
         # Read and process the parameter file.
         self.read_param_file(param_file)
+        self.sim_box = self.initialize_sim_box()
 
-        self.sim_box = {'l_mpchi': self.config['box_size'],
-                        'volume_mpchi': self.config['box_size']**3}
         self.compute_box_mass()
         self.get_target_resolution()
-
 
         # Generate particle load.
         self.nparts = {}
@@ -255,6 +253,14 @@ class ParticleLoad:
 
         return xparams
 
+    def initialize_sim_box(self):
+        """Initialize the structure to hold info about full simulation box."""
+        sim_box = {
+            'l_mpchi': self.config['box_size'],
+            'volume_mpchi': self.config['box_size']**3
+        }
+        return sim_box
+
     def get_target_resolution(self):
         """
         Compute the target resolution.
@@ -266,6 +272,7 @@ class ParticleLoad:
         """
         num_part_equiv = self.config["uniform_particle_number"]
         zone1_gcell_load = self.config["zone1_gcell_load"]
+
         if num_part_equiv is None:
 
             # Compute from target particle mass
@@ -273,14 +280,18 @@ class ParticleLoad:
             if m_target is None:
                 raise ValueError("Must specify target mass!")
 
+            m_target = float(m_target)
             n_per_gcell = np.cbrt(zone1_gcell_load)
 
-            m_target = float(m_target) / self.sim_box['mass_msun']
-            num_equiv_target = 1. / m_target
+            m_frac_target = m_target / self.sim_box['mass_msun']
+            num_equiv_target = 1. / m_frac_target
 
             n_equiv_target = np.cbrt(num_equiv_target)            
             n_gcells_equiv = int(np.rint(n_equiv_target / n_per_gcell))
             num_part_equiv = n_gcells_equiv**3 * zone1_gcell_load
+
+        else:
+            m_target = self.sim_box['mass_msun'] / num_part_equiv
         
         # Sanity check: number of particles must be an integer multiple of the
         # glass file particle number.
@@ -292,6 +303,9 @@ class ParticleLoad:
             )
         self.sim_box['num_part_equiv'] = num_part_equiv
         self.sim_box['n_part_equiv'] = np.cbrt(num_part_equiv)
+
+        print(f"Target resolution is {m_target:.2e} M_Sun, eqiv. to "
+              f"n = {self.sim_box['n_part_equiv']}^3.")
 
     def compute_box_mass(self):
         """Compute the total masses in the simulation volume."""
@@ -370,8 +384,8 @@ class ParticleLoad:
             mask_cell_size = self.mask_data['cell_size'] * f_scale
 
             # Check that the values make sense
-            cmin = np.min(mask_pos)
-            cmax = np.max(mask_pos + mask_cell_size)
+            cmin = np.min(mask_pos - mask_cell_size / 2)
+            cmax = np.max(mask_pos + mask_cell_size / 2)
             if cmin < -gcube['n_cells'] / 2:
                 raise ValueError(
                     f"Minimum mask coordinate in cell units is {cmin}, but "
@@ -895,8 +909,9 @@ class ParticleLoad:
                     f"   {neq / gcube['volume']:,.3f} particles per (cMpc/h)^3."
                 )       
 
-        self.scube['lowest_equiv_n_in_gcube'] = (
-            lowest_gcell_load * gcube['n_cells'])
+        print(f"Lowest gcell load is {lowest_gcell_load}.")
+        self.scube['lowest_equiv_n_in_gcube'] = np.cbrt(
+            lowest_gcell_load * gcube['num_cells'])
 
     def prepare_zone3_particles(self, slab_width=None):
         """
@@ -1212,7 +1227,6 @@ class ParticleLoad:
         pow2 = int(np.ceil(np.log(n_fft_required / n_fft_start) / np.log(2)))
         n_fft = n_fft_start * 2**pow2
         nyq_ratio = n_fft / fft['n_eff']
-        #set_trace()
         print(f"Using FFT grid with {n_fft} points per side\n"
               f"   ({nyq_ratio:.2f} times the target-res Nyquist frequency).")
 
