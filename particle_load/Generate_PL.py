@@ -30,7 +30,6 @@ comm_rank = comm.Get_rank()
 comm_size = comm.Get_size()
 
 # ** TO DO **
-# - Complete get_target_resolution()
 # - Implement multiple-files-per-rank writing
 # - Change internal units from h^-1 Mpc to Mpc, *only* add h^-1 for IC-Gen.
 # - Tidy up output
@@ -75,8 +74,11 @@ class ParticleLoad:
         # Read and process the parameter file.
         self.read_param_file(param_file)
 
-        self.sim_box = self.get_target_resolution()
+        self.sim_box = {'l_mpchi': self.config['box_size'],
+                        'volume_mpchi': self.config['box_size']**3}
         self.compute_box_mass()
+        self.get_target_resolution()
+
 
         # Generate particle load.
         self.nparts = {}
@@ -111,7 +113,6 @@ class ParticleLoad:
             'is_zoom',
             'cosmology',
             'box_size',  # Change, do not require for zoom
-            'uniform_particle_number',   # Change
             'zone1_gcell_load',
         ]
         for att in required_params:
@@ -149,6 +150,7 @@ class ParticleLoad:
             'box_size': None,
             'mask_file': None,
             'uniform_particle_number': None,
+            'target_mass': None,
 
             # In-/output options
             'output_formats': "Fortran, HDF5",
@@ -254,34 +256,45 @@ class ParticleLoad:
         return xparams
 
     def get_target_resolution(self):
-        """Compute the target resolution"""
+        """
+        Compute the target resolution.
 
+        If the uniform(-equivalent) number of particles is specified, this is
+        used. Otherwise, the closest possible number is calculated from the
+        specified target particle mass and number of particles per zone1 gcell.
+
+        """
         num_part_equiv = self.config["uniform_particle_number"]
+        zone1_gcell_load = self.config["zone1_gcell_load"]
         if num_part_equiv is None:
-            # Compute from target particle mass, or...
-            # ... compute from target total number (must have read mask)
 
-            pass
+            # Compute from target particle mass
+            m_target = self.config["target_mass"]
+            if m_target is None:
+                raise ValueError("Must specify target mass!")
+
+            n_per_gcell = np.cbrt(zone1_gcell_load)
+
+            m_target = float(m_target) / self.sim_box['mass_msun']
+            num_equiv_target = 1. / m_target
+
+            n_equiv_target = np.cbrt(num_equiv_target)            
+            n_gcells_equiv = int(np.rint(n_equiv_target / n_per_gcell))
+            num_part_equiv = n_gcells_equiv**3 * zone1_gcell_load
         
         # Sanity check: number of particles must be an integer multiple of the
         # glass file particle number.
-        if np.abs(num_part_equiv / self.config['zone1_gcell_load'] % 1) > 1e-6:
+        if np.abs(num_part_equiv / zone1_gcell_load % 1) > 1e-6:
             raise ValueError(
                 f"The full-box-equivalent particle number "
                 f"({num_part_equiv}) must be an integer multiple of the "
-                f"Zone I gcell load ({self.config['zone1_gcell_load']})!"
+                f"Zone I gcell load ({zone1_gcell_load})!"
             )
-        sim_box = {}
-        sim_box['num_part_equiv'] = num_part_equiv
-        sim_box['n_part_equiv'] = num_part_equiv**(1/3)
-        sim_box['l_mpchi'] = self.config['box_size']
-        sim_box['volume_mpchi'] = sim_box['l_mpchi']**3
-
-        return sim_box
+        self.sim_box['num_part_equiv'] = num_part_equiv
+        self.sim_box['n_part_equiv'] = np.cbrt(num_part_equiv)
 
     def compute_box_mass(self):
         """Compute the total masses in the simulation volume."""
-        num_part_box = self.config['uniform_particle_number'] 
         if comm_rank == 0:
             h = self.cosmo['hubbleParam']
             omega0 = self.cosmo['Omega0']
@@ -1212,7 +1225,7 @@ class ParticleLoad:
             return None
 
         # Extract the number of particles if the whole box were at target res
-        num_part_box = self.config['uniform_particle_number']
+        num_part_box = self.sim_box['num_part_equiv']
 
         # This is trivial for periodic box simulations
         if not self.config['is_zoom']:
@@ -1858,7 +1871,7 @@ class ParticleLoad:
         param_dict['icgen_panphasian_descriptor'] = (
             extra_params['panphasian_descriptor'])
         param_dict['icgen_n_part_for_uniform_box'] = (
-            self.config['uniform_particle_number'])
+            self.sim_box['num_part_equiv'])
         for key_suffix in ['', '2', '_path', '_levels', '2_path', '2_levels']:
             param_dict[f'icgen_constraint_phase_descriptor{key_suffix}'] = (
             extra_params[f'icgen_constraint_phase_descriptor{key_suffix}'])
