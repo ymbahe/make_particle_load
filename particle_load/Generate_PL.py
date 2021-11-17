@@ -216,7 +216,13 @@ class ParticleLoad:
             'fft_n_start': None,
             'icgen_multigrid': True,
             'icgen_num_cores': 28,
-            'panph_descriptor': None,
+            'panphasian_descriptor': None,
+            'icgen_constraint_phase_descriptor': '%dummy',
+            'icgen_constraint_phase_descriptor2': '%dummy',
+            'icgen_constraint_phase_descriptor_levels': '%dummy',
+            'icgen_constraint_phase_descriptor2_levels': '%dummy',
+            'icgen_constraint_phase_descriptor_path': '%dummy',
+            'icgen_constraint_phase_descriptor2_path': '%dummy',
 
             # Softening parameters
             'comoving_eps_ratio': 1/20,
@@ -1849,11 +1855,13 @@ class ParticleLoad:
         param_dict['icgen_cut_t2t3'] = cut_type2_type3
         param_dict['icgen_linear_powspec_file'] = (
             self.cosmo['linear_powerspectrum_file'])
-        param_dict['icgen_panph_descriptor'] = extra_params['panph_descriptor']
+        param_dict['icgen_panphasian_descriptor'] = (
+            extra_params['panphasian_descriptor'])
         param_dict['icgen_n_part_for_uniform_box'] = (
             self.config['uniform_particle_number'])
-        param_dict['icgen_constraint_phase_descriptor'] = '%dummy'
-        param_dict['icgen_constraint_phase_descriptor2'] = '%dummy'
+        for key_suffix in ['', '2', '_path', '_levels', '2_path', '2_levels']:
+            param_dict[f'icgen_constraint_phase_descriptor{key_suffix}'] = (
+            extra_params[f'icgen_constraint_phase_descriptor{key_suffix}'])
         param_dict['icgen_n_fft_mesh'] = fft_params['n_mesh']
         param_dict['icgen_highres_num_eff'] = fft_params['num_eff']
         param_dict['icgen_highres_n_eff'] = fft_params['num_eff']**(1/3)
