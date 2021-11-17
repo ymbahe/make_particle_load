@@ -1,6 +1,6 @@
 # Define some meta-data about the simulation
 MetaData:
-  run_name:   XXX
+  run_name:   $f_name
 
 # Define the system of units to use internally. 
 InternalUnitSystem:
@@ -12,12 +12,12 @@ InternalUnitSystem:
 
 # Cosmological parameters
 Cosmology:
-  h:              XXX        # Reduced Hubble constant
-  a_begin:        XXX     # Initial scale-factor of the simulation
-  a_end:          XXX           # Final scale factor of the simulation
-  Omega_m:        XXX         # Matter density parameter
-  Omega_lambda:   XXX        # Dark-energy density parameter
-  Omega_b:        XXX     # Baryon density parameter
+  h:              $cosmo_hubbleParam
+  a_begin:        $sim_aexp_initial
+  a_end:          $sim_aexp_final
+  Omega_m:        $cosmo_Omega0
+  Omega_lambda:   $cosmo_OmegaLambda
+  Omega_b:        $cosmo_OmegaBaryon
 
 # Parameters governing the time integration
 TimeIntegration:
@@ -26,7 +26,7 @@ TimeIntegration:
   
 # Parameters governing the snapshots
 Snapshots:
-  basename:            XXX
+  basename:            $f_name
   delta_time:          1.02
   scale_factor_first:  0.02
   output_list_on:      1
@@ -50,11 +50,11 @@ Gravity:
   allow_truncation_in_MAC:          1
   epsilon_fmm:                      0.001
   mesh_side_length:                 512
-  comoving_DM_softening:            XXX # Comoving softening for DM (3.32 ckpc)
-  comoving_baryon_softening:        XXX # Comoving softening for baryons (1.79 ckpc)
-  max_physical_DM_softening:        XXX # Physical softening for DM (1.30 pkpc)
-  max_physical_baryon_softening:    XXX # Physical softening for baryons (0.70 pkpc)
-  softening_ratio_background:       XXX 
+  comoving_DM_softening:            $sim_eps_dm_mpc
+  softening_ratio_background:       $sim_eps_to_mips_background
+  max_physical_DM_softening:        $sim_eps_dm_pmpc
+  comoving_baryon_softening:        $sim_eps_baryon_mpc # Comoving softening for baryons (1.79 ckpc)
+  max_physical_baryon_softening:    $sim_eps_baryon_pmpc # Physical softening for baryons (0.70 pkpc)
 
 # Parameters for the hydrodynamics scheme
 SPH:
@@ -65,7 +65,7 @@ SPH:
   minimal_temperature:               100.0    # (internal units)
   initial_temperature:               268.7    # (internal units)
   particle_splitting:                1        # Particle splitting is ON
-  particle_splitting_mass_threshold: XXX     # (internal units, i.e. 7e6 Msun ~ 4x initial gas particle mass)
+  particle_splitting_mass_threshold: $swift_gas_splitting_threshold_1e10msun   # (internal units, i.e. 7e6 Msun ~ 4x initial gas particle mass)
 
 # Parameters of the stars neighbour search
 Stars:
@@ -99,7 +99,7 @@ Restarts:
 
 # Parameters related to the initial conditions
 InitialConditions:
-  file_name:  XXX/XXX.hdf5
+  file_name:  $swift_ics_dir/$f_name.hdf5
   periodic:   1
   cleanup_h_factors: 1               # Remove the h-factors inherited from Gadget
   cleanup_velocity_factors: 1        # Remove the sqrt(a) factor in the velocities inherited from Gadget

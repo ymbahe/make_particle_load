@@ -8,12 +8,12 @@ InternalUnitSystem:
 
 # Planck-13 cosmology
 Cosmology:
-  h:              $HubbleParam
-  a_begin:        $starting_a
-  a_end:          $finishing_a
-  Omega_m:        $Omega0
-  Omega_lambda:   $OmegaLambda
-  Omega_b:        $OmegaBaryon
+  h:              $cosmo_hubbleParam
+  a_begin:        $sim_aexp_initial
+  a_end:          $sim_aexp_final
+  Omega_m:        $cosmo_Omega0
+  Omega_lambda:   $cosmo_OmegaLambda
+  Omega_b:        $cosmo_OmegaBaryon
 
 # Parameters governing the time integration
 TimeIntegration:
@@ -54,9 +54,9 @@ Restarts:
 # Parameters for the self-gravity scheme
 Gravity:
   eta:                              0.025         
-  comoving_DM_softening:            $eps_dm
-  softening_ratio_background:       $softening_ratio_background
-  max_physical_DM_softening:        $eps_dm_physical
+  comoving_DM_softening:            $sim_eps_dm_mpc
+  softening_ratio_background:       $sim_eps_to_mips_background
+  max_physical_DM_softening:        $sim_eps_dm_pmpc
   mesh_side_length:                 1024
   MAC:                              adaptive
   theta_cr:                         0.7
@@ -66,7 +66,7 @@ Gravity:
 
 # Parameters related to the initial conditions
 InitialConditions:
-  file_name:                   $swift_ic_dir_loc/$f_name.hdf5
+  file_name:                   $swift_ics_dir/$f_name.hdf5
   periodic:                    1
   cleanup_h_factors:           1    
   cleanup_velocity_factors:    1
