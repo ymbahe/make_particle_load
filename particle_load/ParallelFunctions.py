@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def my_alltoallv(sendbuf, send_count, send_offset, recvbuf, recv_count, recv_offset, comm,
         comm_rank, comm_size):
     """Alltooallv implemented using sendrecv calls"""
@@ -30,8 +31,13 @@ def repartition(arr, ndesired, comm, comm_rank, comm_size):
     arr : ndarray
         The input array; must be 1-dimensional.
     ndesired : ndarray(int)
+        The target number of elements on each rank.
 
-    ** TO CONTINUE **
+    Returns
+    -------
+    arr_new : ndarray
+        The repartitioned array, with ndesired[i+1] - ndesired[i] number
+        of elements on rank i.
 
     """
 
