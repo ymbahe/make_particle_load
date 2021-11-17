@@ -11,8 +11,8 @@
 # The three parameters below define the type of output
 ------------------------------------------------------------------------------
 2                    ! Output format: (2 - hdf5) (1 - Gadget) (0 - ARJ BINARY)
-$use_ph              ! Indexing: (0 - 4 byte),(1 - 8 byte),(2 - ph), (3 -CSI)
-$nbit                ! nbit - used for P-H indices
+$icgen_indexing      ! Indexing: (0 - 4 byte),(1 - 8 byte),(2 - ph), (3 -CSI)
+$icgen_PH_nbit       ! nbit - used for P-H indices
 1                    ! Endianess:(0 - Big)(1 - Little)(2 - Native)
 ------------------------------------------------------------------------------
 # Gadget file parameters (ignored for ARJ BIN FORMAT-but required to be here)
@@ -21,7 +21,7 @@ $nbit                ! nbit - used for P-H indices
 # The create SPH and species division factors should be given in the form
 # of log10(mparticle division/mass of all particles) - i.e. negative reals.
 ------------------------------------------------------------------------------
-4                             ! Precision of output file (4-single) (8-double)
+4                              ! Precision of output file (4-single) (8-double)
 ------------------------------------------------------------------------------
 0.0 0.0 0.0                    ! Coordinate shift in Gadget Units (0,0,0)=none
 0                              ! App sph truncation about origin?  0 == No
@@ -30,15 +30,15 @@ $nbit                ! nbit - used for P-H indices
 0.0                            ! Omega_b/Omega_0
 0.0                            ! Create SPH particles for dm below this mass
 1.0                            ! Split factor:  0 - place SPH on dark matter
-$n_species                     ! Number of species (excluding gas == sp-0)
-$hr_cut                        ! Division sp-1 and sp-2 (if present)
-$lr_cut                        ! Division sp-2 and sp-3 (if present)
+$icgen_num_species             ! Number of species (excluding gas == sp-0)
+$icgen_cut_t1t2                ! Division sp-1 and sp-2 (if present)
+$icgen_cut_t2t3                ! Division sp-2 and sp-3 (if present)
 0.0                            ! Division sp-3 and sp-4 (if present)
 0.0                            ! Division sp-4 and sp-5 (if present)
 --short_param.inp----------------------------------------------------------------------------
 # Resimulation parameters below:
  --------------------------------------------------------------------------------------------
-$two_lpt                       ! 2lpt ICS:  0-No 1-Yes (Cosm)  2-Yes (Resim)
+$icgen_2lpt_type                       ! 2lpt ICS:  0-No 1-Yes (Cosm)  2-Yes (Resim)
 0                              ! Write out Lagrangian positions 1-Yes,0-No
 0                              ! For Resim ics only:  1: output linear density; 0 nothing
 --------------------------------------------------------------------------------------------
@@ -47,47 +47,47 @@ $two_lpt                       ! 2lpt ICS:  0-No 1-Yes (Cosm)  2-Yes (Resim)
 1                             !             ! Part load Rep factor
 './ic_gen_submit_files/$f_name/ICs/$f_name'  !output file base name
 ------------------------------------------------------------------------------
-'$linear_ps'         ! Input Power spectrum to use
+'$icgen_linear_powspec_file'  ! Input Power spectrum to use
 ------------------------------------------------------------------------------
 # ********* Details of the parent simulation *****************
-$box_size         lbox             ! Parent box size in Mpc/h
-$Omega0  $OmegaLambda  omega0,lambda0  ! Cosmological parameters of parent sim
-$Sigma8            sigma8_p      ! sigma_8(z=0) of parent simulation
-$HubbleParam         Hubble_parameter! Redshift zero Hubble constant in units 100 kms/Mpc
-$starting_z           zshift        ! Redshift of the required displacement field
+$box_size_mpchi         lbox           ! Parent box size in Mpc/h
+$cosmo_Omega0  $cosmo_OmegaLambda  omega0,lambda0  ! Cosmological parameters of parent sim
+$cosmo_sigma8            sigma8_p            ! sigma_8(z=0) of parent simulation
+$cosmo_hubbleParam         Hubble_parameter  ! Redshift zero Hubble constant in units 100 kms/Mpc
+$ics_z_init           zshift           ! Redshift of the required displacement field
 ------------------------------------------------------------------------------
  # ********* Phases used: place the panphasian descriptor on the line below ***
-$panphasian_descriptor
-$is_constraint
+$icgen_panphasian_descriptor
+$icgen_is_constraint
 #-------------- List constraint phase descriptors and (newline) file path, and levels to use  
-$constraint_phase_descriptor
-'$constraint_phase_descriptor_path'
-$constraint_phase_descriptor_levels
-$constraint_phase_descriptor2
-'$constraint_phase_descriptor_path2'
-$constraint_phase_descriptor_levels2
+$icgen_constraint_phase_descriptor
+$icgen_constraint_phase_descriptor_path
+$icgen_constraint_phase_descriptor_levels
+$icgen_constraint_phase_descriptor2
+$icgen_constraint_phase_descriptor2_path
+$icgen_constraint_phase_descriptor2_levels
 -----------------------------------------------------------------------------
 1             igrid           ! Fourier grid number
 0.5           xcentre         ! x - Centre and size in units of lbox
 0.5           ycentre         ! y -    
 0.5           zcentre         ! z -    
 1.0           side0           ! side-length
-$n_particles      nparent         ! Number of particles in parent simulation
-$ndim_fft           ndim_fft        ! Dimension of fourier mesh used
+$icgen_n_part_for_uniform_box      nparent         ! Number of particles in parent simulation
+$icgen_n_fft_mesh     ndim_fft        ! Dimension of fourier mesh used
 0             cic_correct     ! Correct for CIC assign  1 - Yes
 1             iquad           ! Quadratic interp - 1 -Yes(Cancels cic).
 0             idep            ! Number of parent fourier grid
 ------------------------------------------------------------------------------
-$multigrid                             ! Multigrid initial conditions?    0 : No   1: Yes   
+$icgen_is_multigrid          ! Multigrid initial conditions?    0 : No   1: Yes   
 ------------------------------------------------------------------------------
            1  basis function choice: 1 - Use SET8 basis function :0- use SET1
           12  Openning inverse angle (integer) used for multigrid ics only.
           1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 Include contribution from levels - 1=YES
 ------------------------------------------------------------------------------
  # *********** Location of high resolution region *****************
-$coords_x     xcentre  (Mpc/h)   
-$coords_y     ycentre  (Mpc/h)
-$coords_z     zcentre  (Mpc/h)
-$high_res_L          side length (Mpc/h)
-$high_res_n_eff      Effective resolution     ! Number of particles in high res region (=$high_res_n_eff_cube^3)
+$centre_x_mpchi     xcentre  (Mpc/h)   
+$centre_y_mpchi     ycentre  (Mpc/h)
+$centre_z_mpchi     zcentre  (Mpc/h)
+$icgen_highres_l_mpchi  side length (Mpc/h)
+$icgen_highres_num_eff      Effective resolution     ! Number of particles in high res region (=$icgen_highres_n_eff^3)
 ------------------------------------------------------------------------------

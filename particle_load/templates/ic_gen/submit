@@ -1,12 +1,12 @@
 #!/bin/bash -l
 
-#SBATCH --ntasks=$n_cores_ic_gen
+#SBATCH --ntasks=$icgen_n_cores
 #SBATCH --job-name=$f_name
 #SBATCH --output=log_%j.txt
 #SBATCH --partition=cosma7
 #SBATCH --account=dp004
 #SBATCH --exclusive
-#SBATCH --time=$num_hours_ic_gen:00:00
+#SBATCH --time=$icgen_runtime_hours:00:00
 
 module purge
 module load intel_comp/2018 intel_mpi/2018 fftw/2.1.5 gsl/2.4 hdf5/1.10.3
