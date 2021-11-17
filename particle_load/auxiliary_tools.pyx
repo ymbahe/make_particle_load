@@ -5,14 +5,18 @@ from numpy cimport ndarray, int32_t, float64_t, float32_t, int64_t
 import numpy as np
 cimport numpy as np
 
-cdef make_grid(
+
+np.import_array()
+DTYPE = np.float64
+ctypedef np.float64_t DTYPE_t
+
+def make_grid(
     int n_cells_x, int n_cells_y, int n_cells_z, int comm_rank, int comm_size,
     int num_cells):
     cdef int max_n_cells = max(n_cells_x, n_cells_y, n_cells_z)
 
     # ** TODO ** Doing this in Cython via a loop is total overkill.
     # It should **definitely** be possible to do this via straightforward
-    #
 
     # Simple index array over max number of cells per dimension...
     cdef ndarray[float64_t, ndim=1, mode="c"] range_lo = np.array(
@@ -58,7 +62,7 @@ cdef make_grid(
 
     return offsets, cell_nos
 
-cdef _assign_mask_cells(
+def assign_mask_cells(
     ndarray[float64_t, ndim=2] mask_pos,
     double mask_cell_width,
     ndarray[float64_t, ndim=2] gcell_pos,
@@ -117,7 +121,7 @@ cdef _assign_mask_cells(
             break
 
 
-cdef _find_skin_cells(
+def find_skin_cells(
     ndarray[int32_t, ndim=1] cell_types,
     ndarray[int32_t, ndim=1] cell_nos,
     int L, int cell_type
@@ -180,7 +184,7 @@ cdef _find_skin_cells(
         else:
             return np.unique(skin_cells[ind_assigned])
 
-cdef gen_layered_particles_slab(double slab_width, double boxsize, int nq, int nlev, double dv,
+def gen_layered_particles_slab(double slab_width, double boxsize, int nq, int nlev, double dv,
         int comm_rank, int comm_size, int n_tot_lo, int n_tot_hi,
         ndarray[float64_t, ndim=1, mode="c"] coords_x, ndarray[float64_t, ndim=1, mode="c"] coords_y,
         ndarray[float64_t, ndim=1, mode="c"] coords_z, ndarray[float64_t, ndim=1, mode="c"] masses,
@@ -235,7 +239,7 @@ cdef gen_layered_particles_slab(double slab_width, double boxsize, int nq, int n
     coords_z[n_tot_hi:] -= 0.5
     masses[n_tot_hi:] /= boxsize**3.
 
-cdef _guess_nq(double lbox, int nq, int extra, int comm_rank, int comm_size):
+def guess_nq(double lbox, int nq, int extra, int comm_rank, int comm_size):
     """
     Do something suitably obscure.
 
@@ -287,12 +291,22 @@ cdef _guess_nq(double lbox, int nq, int extra, int comm_rank, int comm_size):
 
     return total_volume, nlev
 
-cdef _gen_layered_particles(double side, int nq, int comm_rank,
-        int comm_size, int n_tot_lo, int n_tot_hi, int extra, double total_volume,
-        ndarray[float64_t, ndim=1, mode="c"] coords_x,
-        ndarray[float64_t, ndim=1, mode="c"] coords_y,
-        ndarray[float64_t, ndim=1, mode="c"] coords_z,
-        ndarray[float64_t, ndim=1, mode="c"] masses):
+
+def dicttest(dict gcube):
+    print(f"TEST: gcube side length is {gcube['sidelength']}.")
+
+
+def ndtest(dict gcube, dict scube, dict parts, int comm_rank):
+    cdef ndarray[float64_t, ndim=1, mode="c"] masses = parts['m']
+    cdef long npart = masses.shape[0]
+    cdef long ii = 0
+    for ii in range(npart):
+        masses[ii] = 555
+    return
+
+
+def fill_scube_layers_new(dict gcube, dict scube, dict nparts,
+                      dict parts, int comm_rank, int comm_size):
     """
     Generate Zone III particles for the layers processed on local rank.
     
@@ -302,68 +316,215 @@ cdef _gen_layered_particles(double side, int nq, int comm_rank,
         The total volume of regularly assigned cells (including extra cells
         in outer layer).
 
-    The unit length here is the gcube side length.
+    The unit length here is the simulation box side length.
 
     """
+    cdef ndarray[float64_t, ndim=1, mode="c"] masses = parts['m']
+    cdef ndarray[float64_t, ndim=2, mode="c"] pos = parts['pos']
+
+    cdef double base_l_inner = scube['base_shell_l_inner']
+    cdef int n_scells = scube['n_cells']
+    cdef int n_extra = scube['n_extra']
+    cdef int n_shells = scube['n_shells']
+    cdef double l_ratio = scube['l_ratio']
+    cdef double leap_mass = scube['leap_mass']
+
+    cdef int ishell, ix, iy, iz
+    cdef double x, y, z, m
+    cdef double l_inner, scell_size, x_outer
+    #cdef ndarray[float64_t, ndim=1, mode="c"] x_1d
+
+    # Initialize (local) index of current particle to generate
+    cdef long p_idx = nparts['zone1_local'] + nparts['zone2_local']
+
+    # Loop over shells processed on this rank (inside out) and add particles
+    for ishell in np.arange(comm_rank, n_shells, comm_size):
+        #print(f"Shell {ishell}...")
+        if ishell == n_shells - 1:
+            n_scells += n_extra
+
+        l_inner = base_l_inner * l_ratio**ishell
+        scell_size = l_inner / (n_scells - 2)
+        x_outer = 0.5*l_inner + 0.5*scell_size
+        #x_1d = np.linspace(-x_outer, x_outer, num=n_scells)
+        #m = scell_size**3
+        #if ishell == n_shells - 1:
+        #    m += leap_mass
+
+        for iz in range(n_scells):
+            for iy in range(n_scells):
+                for ix in range(n_scells):
+                    #if iz == 0 or iz == n_scells-1 or iy == 0 or iy == n_scells-1:
+                    #    xgrid = x_1d
+                    #else:
+                    #    xgrid = x_1d[[0, -1]]
+                    #for ix, x in enumerate(xgrid):
+                    if min(ix, iy, iz) == 0 or max(ix, iy, iz) == n_scells - 1:                   
+                        masses[p_idx] = m
+                        pos[p_idx, 0] = -x_outer + ix * scell_size
+                        pos[p_idx, 1] = -x_outer + iy * scell_size
+                        pos[p_idx, 2] = -x_outer + iz * scell_size
+                        
+                        p_idx += 1
+        
+    np_target = nparts['tot_local']
+    if p_idx != np_target:
+        raise ValueError(
+            f"Ended scube filling with {p_idx} particles, not {np_target}!")
+
+
+def fill_scube_layers(dict gcube, dict scube, dict nparts,
+                      dict parts, int comm_rank, int comm_size):
+    """
+    Generate Zone III particles for the layers processed on local rank.
     
-    cdef double lbox = 1./side         # Simulation box size
-    cdef double rat
-    cdef int nlev
-    cdef long count = 0
-    cdef int nh = nq - 1 
-    cdef int l,i,j,k,ik,idx
-    cdef double rlen, rcub
+    Parameters
+    ----------
+    total_volume : double
+        The total volume of regularly assigned cells (including extra cells
+        in outer layer).
 
-    # Cube length of one layer in units of the previous layer's cube length.
-    # This factor is set by geometry, because shells grow by adding across the
-    # old cell's walls.
-    rat = float(nq)/(nq-2)
+    The unit length here is the simulation box side length.
 
-    # Number of layers that comes close to having the box edge exactly on the
-    # outer edge of the outermost layer.
-    nlev = int(np.log10(lbox)/np.log10(rat)+0.5)
+    """
+    cdef ndarray[float64_t, ndim=1, mode="c"] masses = parts['m']
+    cdef ndarray[float64_t, ndim=2, mode="c"] pos = parts['pos']
+
+    cdef double base_l_inner = scube['base_shell_l_inner']
+    cdef int n_scells = scube['n_cells']
+    cdef int n_extra = scube['n_extra']
+    cdef int n_shells = scube['n_shells']
+    cdef double l_ratio = scube['l_ratio']
+    cdef double leap_mass = scube['leap_mass']
+    cdef int i_max = n_scells - 1
+
+    cdef int ishell, ix, iy, iz
+    cdef double m
+    cdef double l_inner, scell_size
+    cdef int n_outer = 0
+    cdef int n_all = 0
+
+    # Initialize (local) index of current particle to generate
+    cdef int p_idx = nparts['zone1_local'] + nparts['zone2_local']
+
+    # Loop over shells inside out and add particles (if assigned to this rank)
+    for ishell in range(n_shells):
+        if ishell % comm_size != comm_rank: continue
+        
+        if ishell == n_shells - 1:
+            n_scells += n_extra
+            i_max = n_scells - 1
+
+        l_inner = base_l_inner * l_ratio**ishell
+        if l_inner > 1:
+            raise ValueError(f"Shell {ishell}: l_inner = {l_inner:.3e} > 1!")
+
+        scell_size = l_inner / (n_scells - 2)
+        m = scell_size**3
+        if ishell == n_shells - 1:
+            m += leap_mass
+
+        # Add the individual particles in this shell.
+        # Looping over the full cube and only processing the outer shell turns
+        # out to be most efficient for this. Similarly, specifying cells by
+        # their doubled-symmetrized indices is more efficient than 0 -> i_max.
+        for iz in range(-i_max, i_max+2, 2):
+            for iy in range(-i_max, i_max+2, 2):
+                for ix in range(-i_max, i_max+2, 2):
+                    if max(abs(iz), abs(iy), abs(ix)) == i_max:
+                        # All particles in the shell have the same mass
+                        masses[p_idx] = m
+
+                        # Equivalent to +/- (0.5*l_inner + 0.5*scell_size)                        
+                        pos[p_idx, 0] = 0.5 * scell_size * ix
+                        pos[p_idx, 1] = 0.5 * scell_size * iy
+                        pos[p_idx, 2] = 0.5 * scell_size * iz
+                        
+                        if ishell == n_shells - 1:
+                            n_outer += 1
+                        p_idx += 1
+                        n_all += 1
+
+    print(f"Placed {n_all} particles, of which {n_outer} in outermost shell.")        
+    np_target = nparts['tot_local']
+    if p_idx != np_target:
+        raise ValueError(
+            f"Ended scube filling with {p_idx} particles, not {np_target}!")
+
+
+def fill_scube_layers_old(dict gcube, dict scube, dict nparts,
+                          dict parts, int comm_rank, int comm_size):
+    """
+    Generate Zone III particles for the layers processed on local rank.
     
-    # Difference in volume to make up the mass; this is the volume added to each particle in the outermost layer.
-    # Unclear what divisor is meant to represent, should be -4 instead of +2, I think.
-    # [2n^2 + 4*((n-2)(n-1))]
-    cdef double dv = (lbox**3. - 1**3. - total_volume) /\
-            ((nq-1+extra)**2 * 6 + 2)
+    Parameters
+    ----------
+    total_volume : double
+        The total volume of regularly assigned cells (including extra cells
+        in outer layer).
 
-    if comm_rank == 0:
-        print('Rescaling box to %.4f Mpc/h with nq of %i, extra of %i, over %i levels.'\
-                %(lbox, nq, extra, nlev))
+    The unit length here is the simulation box side length.
 
-    # Loop over each level/skin layer.
-    for l in range(nlev):
-        if l % comm_size != comm_rank: continue
-        if l == nlev - 1:
-            nq += extra
-            nh = nq -1
-        rlen = rat**l           # INNER length of this cube.
-        rcub = rlen/float(nq-2)   # Length of a cell in the cube. -2 is because of the two 'overhanging' cells at the walls.
-        for k in range(-nh,nh+2,2):
-            for j in range(-nh,nh+2,2):
-                for i in range(-nh,nh+2,2):
+    """        
+    #double side, int nq, int comm_rank,
+    #    int comm_size, int n_tot_lo, int n_tot_hi, int extra, double total_volume,
+    #    ndarray[float64_t, ndim=1, mode="c"] coords_x,
+    #    ndarray[float64_t, ndim=1, mode="c"] coords_y,
+    #    ndarray[float64_t, ndim=1, mode="c"] coords_z,
+    #    ndarray[float64_t, ndim=1, mode="c"] masses):
+
+    cdef ndarray[float64_t, ndim=1, mode="c"] masses = parts['m']
+    cdef ndarray[float64_t, ndim=2, mode="c"] pos = parts['pos']
+    #cdef long npart_tot = masses.shape[0]
+
+    cdef double base_l_inner = scube['base_shell_l_inner']
+    cdef int n_scells = scube['n_cells']
+    cdef int n_extra = scube['n_extra']
+    cdef int n_shells = scube['n_shells']
+    cdef double l_ratio = scube['l_ratio']
+    cdef double leap_mass = scube['leap_mass']
+    cdef long p_idx = nparts['zone1_local'] + nparts['zone2_local']
+    cdef int nh = n_scells - 1 
+    cdef int ishell,i,j,k,ik
+    cdef double l_inner, scell_size
+    cdef double m
+
+    # Loop over shells processed on this rank (inside out) and add particles
+    for ishell in range(n_shells):#np.arange(comm_rank, n_shells, comm_size):
+        if ishell % comm_size != comm_rank:
+            continue
+    #for ishell in np.arange(comm_rank, n_shells, comm_size):
+        #print(f"Shell {ishell}...")
+        if ishell == n_shells - 1:
+            n_scells += n_extra
+            nh = n_scells -1
+        l_inner = base_l_inner * l_ratio**ishell
+        scell_size = l_inner / float(n_scells - 2)
+
+        m = scell_size**3
+        if ishell == n_shells - 1:
+            m += leap_mass
+
+        for k in range(-nh, nh+2, 2):
+            for j in range(-nh, nh+2, 2):
+                for i in range(-nh, nh+2, 2):
                     ik = max(abs(i),abs(j),abs(k))
-                    if ik == nh:
-                        idx = n_tot_hi + count
-                        if l == nlev-1:
-                            masses[idx] = rcub**3.+dv
-                        else:
-                            masses[idx] = rcub**3.
-                        coords_x[idx] = 0.5*rcub*i
-                        coords_y[idx] = 0.5*rcub*j
-                        coords_z[idx] = 0.5*rcub*k
-                        count += 1
+                    if ik == nh:                      
+
+                        masses[p_idx] = m
+                        pos[p_idx, 0] = 0.5 * scell_size * i
+                        pos[p_idx, 1] = 0.5 * scell_size * j
+                        pos[p_idx, 2] = 0.5 * scell_size * k
+                        
+                        p_idx += 1
     
-    assert count == n_tot_lo, 'Out particles dont add up %i, %i'%(count, n_tot_lo)
-    coords_x[n_tot_hi:] /= lbox
-    coords_y[n_tot_hi:] /= lbox
-    coords_z[n_tot_hi:] /= lbox
-    masses[n_tot_hi:] /= lbox**3.
+    np_target = nparts['tot_local']
+    if p_idx != np_target:
+        raise ValueError(
+            f"Ended scube filling with {p_idx} particles, not {np_target}!")
 
 
-cdef _fill_gcells_with_particles(
+def fill_gcells_with_particles(
     ndarray[float64_t, ndim=2] gcell_centres,
     ndarray[float64_t, ndim=2] coords_kernel,
     ndarray[float64_t, ndim=2] coords_parts,
@@ -391,7 +552,6 @@ cdef _fill_gcells_with_particles(
         The mass to assign to each particle.
     part_offset : long
         The index of the first particle to generate here, in the full array.
-
 
     Returns
     -------
@@ -422,7 +582,7 @@ cdef _fill_gcells_with_particles(
     cdef long np_kernel = coords_kernel.shape[0]
     cdef long idx
     cdef long count = 0
-    cdef Py_ssize_t ii, jj, kk
+    cdef Py_ssize_t ii, jj, kk, ind
 
     for ii in range(n_gcells):
         for jj in range(np_kernel):
@@ -432,56 +592,3 @@ cdef _fill_gcells_with_particles(
 		                         coords_kernel[jj, kk])
                 mass_parts[ind] = mass
             count += 1
-
-
-# Aliases to interface these functions with the main code
-
-def find_skin_cells(cell_types, cell_nos, L, cell_type):
-    return _find_skin_cells(cell_types, cell_nos, L, cell_type)
-
-def guess_nq(lbox, nq, extra, comm_rank, comm_size):
-    return _guess_nq(lbox, nq, extra, comm_rank, comm_size)
-
-def assign_mask_cells(mask_pos, mask_cell_width, gcell_pos, gcell_types):
-    return _assign_mask_cells(
-        mask_pos, mask_cell_width, gcell_pos, gcell_types)
-
-def get_layered_particles_slab(slab_width, boxsize, nq, nlev, dv, comm_rank, comm_size,
-        n_tot_lo, n_tot_hi, coords_x, coords_y, coords_z, masses, nq_reduce, extra):
-    _gen_layered_particles_slab(slab_width, boxsize, nq, nlev, dv, comm_rank, comm_size,
-            n_tot_lo, n_tot_hi, coords_x, coords_y, coords_z, masses, nq_reduce, extra)
-
-def layered_particles(side, nq, comm_rank, comm_size, n_tot_lo, n_tot_hi,
-        extra, total_volume, coords_x, coords_y, coords_z, masses):
-    _layered_particles(side, nq, comm_rank, comm_size, n_tot_lo, n_tot_hi, extra,
-            total_volume, coords_x, coords_y, coords_z, masses)
-
-def fill_gcells_with_particles(
-    gcell_centres, coords_kernel, coords_parts, mass_parts, mass, offset):
-    return _fill_gcells_with_particles(
-        gcell_centres, coords_kernel, coords_parts, mass_parts, mass, offset)
-
-
-def get_grid(n_cells_x, n_cells_y, n_cells_z, comm_rank, comm_size, num_cells):
-    """
-    Function to generate a grid...
-
-    Parameters
-    ----------
-    n_cells_x, n_cells_y, n_cells_z : float
-        Number of cells in the x, y, and z dimensions, respectively
-    comm_rank : int
-        MPI rank of this process.
-    comm_size : int
-        Total number of MPI ranks.
-    num_cells : int
-        The number of cells to be processed by this MPI rank.
-
-    Returns
-    -------
-    offsets : ???
-    cell_nos : ???
-
-    """
-    return make_grid(
-        n_cells_x, n_cells_y, n_cells_z, comm_rank, comm_size, num_cells)
