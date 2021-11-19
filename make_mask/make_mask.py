@@ -469,7 +469,7 @@ class MakeMask:
             edges[ind_sel_basic[0]], edges[ind_sel_basic[1]],
             edges[ind_sel_basic[2]]
         )).T
-        self.cell_coords_basic += self.cell_size * 0.5
+        self.basic_cell_coords += self.cell_size * 0.5
 
         # Find the box that (fully) encloses all selected cells, and the
         # side length of its surrounding cube
