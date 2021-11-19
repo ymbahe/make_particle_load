@@ -442,6 +442,7 @@ class MakeMask:
         self.mask, edges = self.build_basic_mask(
             ic_coords, np.max(widths) * padding_factor)
         self.cell_size = edges[1] - edges[0]
+        self.basic_mask = np.copy(self.mask)
 
         # We only need MPI rank 0 for the rest, since we are done working with
         # individual particles
@@ -461,6 +462,14 @@ class MakeMask:
             (edges[ind_sel[0]], edges[ind_sel[1]], edges[ind_sel[2]])
             ).T
         self.cell_coords += self.cell_size * 0.5
+
+        # ... and the same for the 'basic' (un-refined) mask
+        ind_sel_basic = np.where(self.basic_mask)
+        self.basic_cell_coords = np.vstack((
+            edges[ind_sel_basic[0]], edges[ind_sel_basic[1]],
+            edges[ind_sel_basic[2]]
+        )).T
+        self.cell_coords_basic += self.cell_size * 0.5
 
         # Find the box that (fully) encloses all selected cells, and the
         # side length of its surrounding cube
@@ -980,6 +989,12 @@ class MakeMask:
                             "Coordinates of the centres of selected mask "
                             "cells. The (uniform) cell width is stored as the "
                             "attribute `grid_cell_width`.")
+
+            db = f.create_dataset(
+                'Basic_Coordinates', data=np.array(self.basic_cell_coords))
+            db.attrs.create('Description',
+                            "Coordinates of the centres of the un-refined "
+                            "mask cells [h^-1 Mpc].")
 
             # Store attributes directly related to the mask as HDF5 attributes.
             ds.attrs.create('bounding_length', self.mask_extent)
