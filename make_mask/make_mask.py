@@ -562,7 +562,7 @@ class MakeMask:
 
         elif self.params['data_type'].lower() == 'swift':
             snap = read_swift(self.params['snap_file'], comm=comm)
-            self.params['bs'] = float(snap.HEADER['BoxSize'])
+            self.params['box_size'] = float(snap.HEADER['BoxSize'])
             self.params['h_factor'] = float(snap.COSMOLOGY['h'])
             self.params['length_unit'] = 'Mpc'
             self.params['redshift'] = snap.HEADER['Redshift']
@@ -584,7 +584,7 @@ class MakeMask:
         # shifting it back down by half a box)
         cen = self.params['centre']
         coords -= cen
-        periodic_wrapping(coords, self.params['bs'])
+        periodic_wrapping(coords, self.params['box_size'])
 
         # Select particles within target region
         l_unit = self.params['length_unit']
@@ -641,8 +641,8 @@ class MakeMask:
             self.params['dim'] *= h
         if 'centre' in keys:
             self.params['centre'] *= h
-        if 'bs' in keys:
-            self.params['bs'] *= h
+        if 'box_size' in keys:
+            self.params['box_size'] *= h
         if 'mask_cell_size' in keys:
             self.params['mask_cell_size'] *= h
 
@@ -688,13 +688,13 @@ class MakeMask:
 
         # Re-scale quantized coordinates to floating-point distances between
         # origin and centre of corresponding grid cell
-        cell_size = self.params['bs'] / 2**self.params['bits']
+        cell_size = self.params['box_size'] / 2**self.params['bits']
         ic_coords = (ic_coords.astype('float') + 0.5) * cell_size
 
         # Shift coordinates to the centre of target high-resolution region and
         # apply periodic wrapping
         ic_coords -= self.params['centre']
-        periodic_wrapping(ic_coords, self.params['bs'])
+        periodic_wrapping(ic_coords, self.params['box_size'])
 
         return ic_coords.astype('f8')
 
@@ -772,7 +772,7 @@ class MakeMask:
 
         """
         # Find out how far from the origin we need to extend the mask
-        width = min(max_width, self.params['bs'])
+        width = min(max_width, self.params['box_size'])
 
         # Work out how many cells we need along each dimension so that the
         # cells remain below the specified threshold size
@@ -983,6 +983,7 @@ class MakeMask:
 
             # Store attributes directly related to the mask as HDF5 attributes.
             ds.attrs.create('bounding_length', self.mask_extent)
+            ds.attrs.create('box_size', self.params['box_size'])
             ds.attrs.create('geo_centre', self.mask_centre)
             ds.attrs.create('grid_cell_width', self.cell_size)
             if self.params['shape'] in ['cuboid', 'slab']:
