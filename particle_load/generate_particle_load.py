@@ -1491,7 +1491,7 @@ class ParticleLoad:
                   f"(Zone III) ----\n")
 
         if npart_local > 0:
-            cy.fill_scube_layers(self.gcube, self.scube, self.nparts,
+            cy.fill_scube_layers(self.scube, self.nparts,
                                  parts, comm_rank, comm_size)
 
             m_max = np.max(parts['m'][offset_zone3 : ])
@@ -1657,8 +1657,8 @@ class ParticleLoad:
             if comm_rank == 0:
                 print('Randomizing arrays...')
             idx = np.random.permutation(self.nparts['tot_local'])
-            parts['pos'] = parts['pos'][idx, :]
-            parts['m'] = parts['m'][idx]
+            self.parts['pos'] = self.parts['pos'][idx, :]
+            self.parts['m'] = self.parts['m'][idx]
 
         # Load balance across MPI ranks.
         self.repartition_particles()
