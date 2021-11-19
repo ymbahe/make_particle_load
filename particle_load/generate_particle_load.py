@@ -1641,9 +1641,6 @@ class ParticleLoad:
         -------
         None
 
-        ** TODO ** Modify this so that each rank breaks its own particles
-        down into chunks with at most the max allowed number of particles.
-
         """
         output_formats = self.config['output_formats'].lower()
         save_as_hdf5 = 'hdf5' in output_formats
@@ -1675,6 +1672,10 @@ class ParticleLoad:
             if not os.path.exists(save_dir_bin) and save_as_fortran_binary:
                 os.makedirs(save_dir_bin)
 
+        num_files_per_rank = self.find_fortran_file_split()
+        separation_indices = np.linspace(
+            self.parts['m'].shape[0], num_files_per_rank+1, endpoint=True)
+
         # Make sure to save no more than max_save files at a time.
         max_save = 50
         n_batch = int(np.ceil(comm_size / max_save))
@@ -1685,8 +1686,13 @@ class ParticleLoad:
                     self.save_local_particles_as_hdf5(hdf5_loc)
 
                 if save_as_fortran_binary:
-                    fortran_loc = f"{save_dir_bin}/PL.{comm_rank}"
-                    self.save_local_particles_as_binary(fortran_loc)
+                    for iifile in range(num_files_per_rank):
+                        ifile = comm_rank * num_files_per_rank + iifile
+                        fortran_loc = f"{save_dir_bin}/PL.{ifile}"
+                        start_index = separation_indices[iifile]
+                        end_index = separation_indices[iifile+1]
+                        self.save_local_particles_as_binary(
+                            ifile, fortran_loc, start_index, end_index)
 
                 if self.verbose:
                     print(
@@ -1724,14 +1730,6 @@ class ParticleLoad:
                 f"{num_part_min} to {num_part_max} particles."
             )
 
-            # Change this in future by allowing one rank to write >1 files
-            if np.max(num_per_rank) > self.config['max_numpart_per_file']:
-                print(f"***WARNING*** Re-partitioning will lead to (max) "
-                      f"{np.max(num_per_rank):,} particles per file, more "
-                      f"than the indicated maximum of "
-                      f"{self.config['max_numpart_per_file']}!"
-                )
-
         self.parts['m'] = pf.repartition(
             self.parts['m'], num_per_rank, comm, comm_rank, comm_size) 
         num_part_new = len(self.parts['m'])
@@ -1755,6 +1753,17 @@ class ParticleLoad:
 
         if comm_rank == 0:
             print('Done with load balancing.')
+
+    def find_fortran_file_split(self):
+        """Work out how many Fortran files to write per rank."""
+        max_num_per_file = self.config['max_numpart_per_file']
+        num_files = int(
+            np.ceil(self.parts['m'].shape[0] / max_num_per_file))
+        num_files = comm.allreduce(num_files, op=MPI.MAX)
+        if comm_rank == 0:
+            print(f"Will write {num_files} Fortran files per rank.")
+
+        return num_files
 
     def save_local_particles_as_hdf5(self, save_loc):
         """Write local particle load to HDF5 file `save_loc`"""
@@ -1788,15 +1797,30 @@ class ParticleLoad:
         if comm_rank == 0:
             print(f"Done saving local particles to '{save_loc}'.")
 
-    def save_local_particles_as_binary(self, save_loc):
-        """Write local particle load to Fortran binary file `save_loc`"""
+    def save_local_particles_as_binary(
+        self, index, save_loc, start=None, end=None):
+        """
+        Write (part of) local particle load to Fortran binary file `save_loc`.
+
+        Parameters
+        ----------
+        index : int
+            The (numerical) index of the file to write (starting from 0).
+        save_loc : str
+            The file to write data to.
+        start : int
+            The first index of local particle array to write to this file.
+        end : int
+            The one-beyond-last index of local particle array to write.
+
+        """
         f = FortranFile(save_loc, mode="w")
 
         # Write first 4+8+4+4+4 = 24 bytes
         f.write_record(
             np.int32(self.nparts['tot_local']),
             np.int64(self.nparts['tot_all']),
-            np.int32(comm_rank),    # Index of this file
+            np.int32(index),        # Index of this file
             np.int32(comm_size),    # Total number of files
             np.int32(0),
             
