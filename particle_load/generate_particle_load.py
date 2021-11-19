@@ -29,7 +29,6 @@ comm_rank = comm.Get_rank()
 comm_size = comm.Get_size()
 
 # ** TO DO **
-# - Implement multiple-files-per-rank writing
 # - Change internal units from h^-1 Mpc to Mpc, *only* add h^-1 for IC-Gen.
 # - Tidy up output
 
@@ -108,7 +107,6 @@ class ParticleLoad:
             'sim_name',
             'is_zoom',
             'cosmology',
-            'box_size',  # Change, do not require for zoom
             'zone1_gcell_load',
         ]
         for att in required_params:
@@ -353,7 +351,6 @@ class ParticleLoad:
 
         """
         stime = time.time()
-        lbox_mpchi = self.sim_box['l_mpchi']
         mask_file = self.config['mask_file']
 
         if not self.config['is_zoom']:
@@ -376,6 +373,9 @@ class ParticleLoad:
             with h5.File(mask_file, 'r') as f:
                 
                 # Centre of the high-res zoom in region
+                lbox_mpchi = f['Coordinates'].attrs.get['box_size']
+                self.sim_box['l_mpchi'] = lbox_mpchi
+
                 centre = np.array(
                     f['Coordinates'].attrs.get("geo_centre")) / lbox_mpchi
 
@@ -384,6 +384,7 @@ class ParticleLoad:
                     f['Coordinates'][...], dtype='f8') / lbox_mpchi
                 mask_data['cell_size'] = (
                     f['Coordinates'].attrs.get("grid_cell_width")) / lbox_mpchi
+                self.sim_box['l_mpchi'] = f['Coordinates'].attrs.get("box_size")
 
                 # Also load the side length of the cube enclosing the mask,
                 # and the volume of the target high-res region (at the
@@ -393,6 +394,7 @@ class ParticleLoad:
                 mask_data['high_res_volume'] = (
                     f['Coordinates'].attrs.get("high_res_volume")
                     / lbox_mpchi**3)
+
         else:
             mask_data = None
             centre = None
