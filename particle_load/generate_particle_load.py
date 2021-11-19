@@ -9,9 +9,9 @@ from scipy.spatial import distance
 from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
 from mpi4py import MPI
-from ParallelFunctions import repartition
+import parallel_functions as pf
 #import MakeGrid as cy
-import MakeParamFile as mpf
+import param_file_routines as pr
 from scipy.io import FortranFile
 import time
 
@@ -1825,9 +1825,9 @@ class ParticleLoad:
         all_params = self.compile_param_dict(fft_params, eps, n_cores_icgen)
 
         if create_param:
-            mpf.make_all_param_files(all_params, codes.lower())
+            pr.make_all_param_files(all_params, codes.lower())
         if create_submit:
-            mpf.make_all_submit_files(all_params, codes.lower())
+            pr.make_all_submit_files(all_params, codes.lower())
 
     def compile_param_dict(self, fft_params, eps, n_cores_icgen):
         """Compile a dict of all parameters required for param/submit files."""
@@ -2136,7 +2136,7 @@ class ParticleLoad:
                       f"{self.config['max_numpart_per_file']}!"
                 )
 
-        self.parts['m'] = repartition(
+        self.parts['m'] = pf.repartition(
             self.parts['m'], num_per_rank, comm, comm_rank, comm_size) 
         num_part_new = len(self.parts['m'])
 
@@ -2148,7 +2148,7 @@ class ParticleLoad:
             self.parts['pos'][self.nparts['tot_local']: , : ] = -1
 
         for idim in range(3):
-            self.parts['pos'][: num_part_new, idim] = repartition(
+            self.parts['pos'][: num_part_new, idim] = pf.repartition(
             self.parts['pos'][:, idim], num_per_rank,
             comm, comm_rank, comm_size
         )
