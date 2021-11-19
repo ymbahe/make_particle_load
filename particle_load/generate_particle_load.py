@@ -10,7 +10,6 @@ from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
 from mpi4py import MPI
 import parallel_functions as pf
-#import MakeGrid as cy
 import param_file_routines as pr
 from scipy.io import FortranFile
 import time
@@ -33,7 +32,6 @@ comm_size = comm.Get_size()
 # - Implement multiple-files-per-rank writing
 # - Change internal units from h^-1 Mpc to Mpc, *only* add h^-1 for IC-Gen.
 # - Tidy up output
-# - Re-arrange 
 
 class ParticleLoad:
     """
@@ -81,7 +79,7 @@ class ParticleLoad:
         # Generate particle load.
         self.nparts = {}
         self.scube = {}
-        
+        self.mask_data, self.centre = self.load_mask_file()
         self.parts = self.make_particle_load(only_calc_ntot=only_calc_ntot)
 
         # Generate param and submit files, if desired (NOT YET IMPLEMENTED).
@@ -261,6 +259,28 @@ class ParticleLoad:
         }
         return sim_box
 
+    def compute_box_mass(self):
+        """Compute the total masses in the simulation volume."""
+        if comm_rank == 0:
+            h = self.cosmo['hubbleParam']
+            omega0 = self.cosmo['Omega0']
+            omega_baryon = self.cosmo['OmegaBaryon']
+
+            cosmo = FlatLambdaCDM(
+                H0=h*100., Om0=omega0, Ob0=omega_baryon)
+            rho_crit = cosmo.critical_density0.to(u.solMass / u.Mpc ** 3).value
+
+            box_volume = self.sim_box['volume_mpchi'] / h
+            m_tot = omega0 * rho_crit * box_volume
+
+        else:
+            m_tot = None
+
+        # Send masses to all MPI ranks and store as class attributes
+        self.sim_box['mass_msun'] = comm.bcast(m_tot)
+        if self.verbose:
+            print(f"Total box mass is {self.sim_box['mass_msun']:.2e} M_Sun")
+
     def get_target_resolution(self):
         """
         Compute the target resolution.
@@ -307,27 +327,273 @@ class ParticleLoad:
         print(f"Target resolution is {m_target:.2e} M_Sun, eqiv. to "
               f"n = {self.sim_box['n_part_equiv']}^3.")
 
-    def compute_box_mass(self):
-        """Compute the total masses in the simulation volume."""
+    def load_mask_file(self):
+        """
+        Load the (previously computed) mask file that defines the zoom region.
+
+        Most of this is only relevant for zoom simulations; for uniform volume
+        ICs we only return (0.5, 0.5, 0.5) as the "centre". For zooms, te mask
+        file should have been generated with the `MakeMask` class in 
+        `make_mask/make_mask.py`; an error is raised if no mask file is
+        specified or if the specified file does not exist.
+                
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        mask_data : dict
+            Dict containing the coordinates and sizes of all mask cells,
+            as well as the extent of their cubic bounding box.
+            ** TODO ** Should also load the box size here.
+
+        centre : ndarray(float) [3]
+            The central point of the mask in the simulation box.
+
+        """
+        stime = time.time()
+        lbox_mpchi = self.sim_box['l_mpchi']
+        mask_file = self.config['mask_file']
+
+        if not self.config['is_zoom']:
+            print(f"Uniform volume simulation, centre: "
+                  f"{self.sim_box['l_mpchi'] * 0.5:.2f} h^-1 Mpc in x/y/z.")
+            return None, np.array((0.5, 0.5, 0.5))
+
         if comm_rank == 0:
-            h = self.cosmo['hubbleParam']
-            omega0 = self.cosmo['Omega0']
-            omega_baryon = self.cosmo['OmegaBaryon']
+            if self.config['mask_file'] is None:
+                raise AttributeError(
+                    "You need to specify a mask file for a zoom simulation!"
+                )
+            if not os.path.isfile(mask_file):
+                raise OSError(
+                    f"The specified mask file '{mask_file}' does not exist!")
 
-            cosmo = FlatLambdaCDM(
-                H0=h*100., Om0=omega0, Ob0=omega_baryon)
-            rho_crit = cosmo.critical_density0.to(u.solMass / u.Mpc ** 3).value
+        # Load data on rank 0 and then distribute to other MPI ranks
+        if comm_rank == 0:
+            mask_data = {}
+            with h5.File(mask_file, 'r') as f:
+                
+                # Centre of the high-res zoom in region
+                centre = np.array(
+                    f['Coordinates'].attrs.get("geo_centre")) / lbox_mpchi
 
-            box_volume = self.sim_box['volume_mpchi'] / h
-            m_tot = omega0 * rho_crit * box_volume
+                # Data specifying the mask for the high-res region
+                mask_data['cell_coordinates'] = np.array(
+                    f['Coordinates'][...], dtype='f8') / lbox_mpchi
+                mask_data['cell_size'] = (
+                    f['Coordinates'].attrs.get("grid_cell_width")) / lbox_mpchi
 
+                # Also load the side length of the cube enclosing the mask,
+                # and the volume of the target high-res region (at the
+                # selection redshift).                
+                mask_data['extent'] = (
+                    f['Coordinates'].attrs.get("bounding_length")) / lbox_mpchi
+                mask_data['high_res_volume'] = (
+                    f['Coordinates'].attrs.get("high_res_volume")
+                    / lbox_mpchi**3)
         else:
-            m_tot = None
+            mask_data = None
+            centre = None
 
-        # Send masses to all MPI ranks and store as class attributes
-        self.sim_box['mass_msun'] = comm.bcast(m_tot)
-        if self.verbose:
-            print(f"Total box mass is {self.sim_box['mass_msun']:.2e} M_Sun")
+        mask_data = comm.bcast(mask_data)
+        centre = comm.bcast(centre)
+
+        if comm_rank == 0:
+            centre_mpchi = centre * lbox_mpchi 
+            num_mask_cells = mask_data['cell_coordinates'].shape[0]
+            print(f"Finished loading data from mask file "
+                  f"({time.time() - stime:.2e} sec.)")
+            print(f"  Target centre: "
+                  f"{centre[0]:.2f} / {centre[1]:.2f} / {centre[2]:.2f}; "
+                  f"({centre_mpchi[0]:.2f} / {centre_mpchi[1]:.2f} / "
+                  f"{centre_mpchi[2]:.2f}) h^-1 Mpc")
+            print(f"  Bounding side: {mask_data['extent']:.3f} x box length\n"
+                  f"  Number of cells: {num_mask_cells} (cell size: "
+                  f"{mask_data['cell_size'] * lbox_mpchi:.2f} h^-1 Mpc)\n"
+            )
+
+        return mask_data, centre
+
+    def make_particle_load(self, only_calc_ntot=False):
+        """
+        Main driver function to generate the particle load.
+
+        For zoom-in simulations, it generates three classes of particles:
+        (i)   those at the target resolution within "Zone I", the volume
+              specified by the pre-defined mask (and generally slightly beyond
+              it).
+        (ii)  medium resolution particles within "Zone II", the remaining
+              volume within a cubic box. These particles have a range of
+              masses depending on how far away they are from Zone I. 
+        (iii) low resolution particles within "Zone III", the remaining
+              volume of the simulation box. Particles again have a range of
+              masses depending on their distance from Zone II.
+
+        For uniform-volume simulations, Zone I always covers the entire box.
+
+        Parameters
+        ----------
+        only_calc_ntot : bool, optional
+            Switch to skip the actual particle generation (default: False).
+
+        Returns
+        -------
+        parts : dict
+            The properties of the generated particles. It has two keys:
+            - pos : ndarray(float) [N_part, 3]
+                The x, y, and z coordinates of the particles generated on the
+                local MPI rank.
+            - m : ndarray(float) [N_part]
+                The masses (in units of the total box mass) of each particle. 
+
+        """
+        if comm_rank == 0:
+            print('\n-------------------------')
+            print('Generating particle load...')
+            print('-------------------------\n')
+
+        # --------------------------------------------------------------------
+        # --- Act I: Preparation (find structure and number of particles) ---
+        # -------------------------------------------------------------------- 
+
+        # Set up the gcube and generate local gcells
+        self.gcube = self.set_up_gcube()
+
+        # Prepare uniform grid cell structure within gcube
+        # (sets up self.gcell_info)
+        gcells = self.generate_gcells()
+
+        # Prepare the cubic shell structure filling the outer box (Zone III)
+        # (sets up self.scube dict)
+        self.prepare_zone3_particles()
+
+        if comm_rank == 0:
+            self.print_particle_load_info(gcells)
+
+        # If this is a "dry run" and we only want the particle number, quit.
+        if only_calc_ntot:
+            return
+
+        # -------------------------------------------------------------------
+        # ------ Act II: Creation (generate and verify particles) ----------
+        # -------------------------------------------------------------------
+
+        # Initiate particle arrays.
+        pos = np.zeros((self.nparts['tot_local'], 3), dtype='f8') - 1e30
+        masses = np.zeros(self.nparts['tot_local'], dtype='f8') - 1
+        parts = {'pos': pos, 'm': masses}
+
+        # Magic, part I: populate local gcells with particles (Zone I/II)
+        self.generate_gcube_particles(gcells, parts)
+         
+        # Magic, part II: populate outer region with particles (Zone III)
+        self.generate_zone3_particles(parts)
+
+        # -------------------------------------------------------------------
+        # --- Act III: Transformation (shift coordinate system to target) ---
+        # -------------------------------------------------------------------
+
+        # Make sure that the particles are sensible before shifting
+        self.verify_particles(parts)
+
+        # Move particle load to final position in the simulation box
+        self.shift_particles_to_target_position(parts)
+
+        return parts
+
+    def set_up_gcube(self):
+        """
+        Set up the frame of the gcube.
+
+        This delineates the region filled with high(er) resolution particles,
+        and is centred on the origin (same as the input mask).
+
+        Parameters
+        ----------
+        None (this may change).
+
+        Returns
+        -------
+        gcube : dict
+            Dict specifying the structure of the gcube with the following keys:
+            - ...
+
+        """
+        stime = time.time()
+        gcube = {}
+
+        num_part_box = self.sim_box['num_part_equiv']
+        zone1_gcell_load = self.config['zone1_gcell_load']
+        num_buffer_gcells = self.config['gcube_n_buffer_cells']
+
+        # Find the closest number of gcells that fill the box along one
+        # side length. Recall that num_part_box is already guaranteed
+        # to be (close to) an integer multiple of zone1_gcell_load, so the
+        # rounding here is only to avoid numerical rounding issues.
+        n_base = int(np.rint((num_part_box / zone1_gcell_load)**(1/3)))
+        if (n_base**3 * zone1_gcell_load != num_part_box):
+            raise ValueError(
+                f"Want to use {n_base} cells per dimension, but this would "
+                f"give {n_base**3 * zone1_gcell_load} particles, instead of "
+                f"the target number of {num_part_box} particles."
+            )
+
+        # Side length of one gcell
+        gcube['cell_size_mpchi'] = self.sim_box['l_mpchi'] / n_base
+        gcube['cell_size'] = 1. / n_base   # In sim box size units
+
+        if self.config['is_zoom']:
+            # In this case, we have fewer gcells (in general), but still
+            # use the same size.
+            mask_cube_size = self.mask_data['extent']
+            n_gcells = int(np.ceil(mask_cube_size / gcube['cell_size']))
+            gcube['n_cells'] = n_gcells + num_buffer_gcells * 2
+
+            # Make sure that we don't assign more than the total number of
+            # cells to the high-resolution region
+            if gcube['n_cells'] > n_base:
+                raise ValueError(
+                    f"Cannot assign {gcube['n_cells']} cells per dimension to "
+                    f"gcube if there are only {n_base} cells per "
+                    "dimension in total!"
+                )
+        else:
+            # Simple: whole box filled by high-resolution glass cells.
+            gcube['n_cells'] = n_base
+            mask_cube_size = 1.0
+
+        gcube['num_cells'] = gcube['n_cells']**3
+        if gcube['num_cells'] > (2**32) / 2:          # Dat kan niet.
+            raise Exception(
+                f"Total number of gcells ({gcube['num_cells']}) "
+                f"is too large, can only have up to {(2**32)/2}."
+            )
+
+        # Compute the physical size of the gcube. Note that, for a
+        # zoom simulation, this is generally not the same as the size of the
+        # mask box, because of the applied buffer and quantization.
+        gcube['sidelength_mpchi'] = gcube['cell_size_mpchi'] * gcube['n_cells']
+        gcube['sidelength'] = gcube['cell_size'] * gcube['n_cells']
+        gcube['volume_mpchi'] = gcube['sidelength_mpchi']**3
+        gcube['volume'] = gcube['sidelength']**3
+ 
+        if comm_rank == 0:
+            print(
+                f"Finished setting up gcube ({time.time() - stime:.2e} sec.)\n"
+                f"  Side length: {gcube['sidelength_mpchi']:.4f} h^-1 Mpc "
+                f"(= {gcube['sidelength']:.3e} x box size)\n"
+                f"  Volume: {gcube['volume_mpchi']:.4f} (h^-1 Mpc)^3 "
+                f"({gcube['volume'] * 100:.3f} % of the simulation volume,\n      "
+                f"{gcube['volume']/(mask_cube_size**3) * 100:.3f} % "
+                f"of the mask bounding cube)\n"
+                f"  {gcube['n_cells']} gcells per dimension, of size "
+                f"{gcube['cell_size_mpchi']:.3f} Mpc/h\n"
+                f"  {gcube['num_cells']} gcells in total\n"
+            )
+
+        return gcube
 
     def generate_gcells(self):
         """
@@ -532,6 +798,60 @@ class ParticleLoad:
                   f"to Zone II gcells ({time.time() - stime:.2e} sec.)")
 
         return source_type + 2       # includes type 0; num = max + 1
+
+    def prepare_zone3_particles(self, slab_width=None):
+        """
+        Set up the information required to populate Zone III with particles.
+
+        This is a thin wrapper around self.find_scube_structure(), which
+        fills the dict `scube` with information about the cubic shell
+        structure holding the particles.
+
+        Called by: make_particle_load()
+
+        Parameters
+        ----------
+        slab_width : float, optional
+            Width of the slab, only in (not fully supported) slab mode...
+
+        Returns
+        -------
+        None
+
+        Class attributes updated
+        ------------------------
+        nparts :
+            - 'zone3_local', 'tot_local' : int
+                The local (this rank) number of particles in zone3 and total.
+            - 'zone3_all', 'tot_all' : int
+                The total (cross-MPI) number of particles in zone3 and total.
+
+        """
+        zone3_ncell_factor = self.config['zone3_ncell_factor']
+
+        if not self.config['is_zoom']:
+            self.nparts['zone3_local'] = 0
+            self.nparts['zone3_all'] = 0
+            return
+
+        # Ideal number of scells per dimension: a bit lower than the equivalent
+        # of the largest inter-particle spacing in the gcube.
+        target_n_scells = int(np.clip(
+            self.scube['lowest_equiv_n_in_gcube'] * zone3_ncell_factor,
+            self.config['zone3_min_n_cells'], self.config['zone3_max_n_cells']
+        ))
+        if comm_rank == 0 and self.verbose > 1:
+            print(f"\nZone III cubic shells should have a target number of "
+                  f"{target_n_scells} cells per dimension.")
+
+        # Find the actual number of scells including geometric constraints
+        # of the scube, and the scube parameters and total particle number.
+        npart_zone3 = self.find_scube_structure(target_n_scells)
+
+        self.nparts['zone3_local'] = npart_zone3
+        self.nparts['tot_local'] += npart_zone3
+        self.nparts['zone3_all'] = comm.allreduce(npart_zone3)
+        self.nparts['tot_all'] += self.nparts['zone3_all']
 
     def find_scube_structure(self, target_n_cells, tolerance_n_cells=5,
                              max_extra=10, eps=0.01):
@@ -913,60 +1233,6 @@ class ParticleLoad:
         self.scube['lowest_equiv_n_in_gcube'] = np.cbrt(
             lowest_gcell_load * gcube['num_cells'])
 
-    def prepare_zone3_particles(self, slab_width=None):
-        """
-        Set up the information required to populate Zone III with particles.
-
-        This is a thin wrapper around self.find_scube_structure(), which
-        fills the dict `scube` with information about the cubic shell
-        structure holding the particles.
-
-        Called by: make_particle_load()
-
-        Parameters
-        ----------
-        slab_width : float, optional
-            Width of the slab, only in (not fully supported) slab mode...
-
-        Returns
-        -------
-        None
-
-        Class attributes updated
-        ------------------------
-        nparts :
-            - 'zone3_local', 'tot_local' : int
-                The local (this rank) number of particles in zone3 and total.
-            - 'zone3_all', 'tot_all' : int
-                The total (cross-MPI) number of particles in zone3 and total.
-
-        """
-        zone3_ncell_factor = self.config['zone3_ncell_factor']
-
-        if not self.config['is_zoom']:
-            self.nparts['zone3_local'] = 0
-            self.nparts['zone3_all'] = 0
-            return
-
-        # Ideal number of scells per dimension: a bit lower than the equivalent
-        # of the largest inter-particle spacing in the gcube.
-        target_n_scells = int(np.clip(
-            self.scube['lowest_equiv_n_in_gcube'] * zone3_ncell_factor,
-            self.config['zone3_min_n_cells'], self.config['zone3_max_n_cells']
-        ))
-        if comm_rank == 0 and self.verbose > 1:
-            print(f"\nZone III cubic shells should have a target number of "
-                  f"{target_n_scells} cells per dimension.")
-
-        # Find the actual number of scells including geometric constraints
-        # of the scube, and the scube parameters and total particle number.
-        npart_zone3 = self.find_scube_structure(target_n_scells)
-
-        self.nparts['zone3_local'] = npart_zone3
-        self.nparts['tot_local'] += npart_zone3
-        self.nparts['zone3_all'] = comm.allreduce(npart_zone3)
-        self.nparts['tot_all'] += self.nparts['zone3_all']
-
     def _find_global_mass_distribution(self, local_masses):
         """
         Find and store the global distribution of particle masses.
@@ -995,6 +1261,43 @@ class ParticleLoad:
                     f"({zone2_m_min * m_to_msun:.2e} -> "
                     f"{zone2_m_max * m_to_msun:.2e} M_Sun)."
                 )
+
+    def print_particle_load_info(self, gcells):
+        """Print information about to-be-generated particles (rank 0 only)."""
+        max_parts_per_file = self.config["max_numpart_per_file"]
+
+        if comm_rank != 0:
+            return
+
+        np1 = self.nparts['zone1_all']
+        np2 = self.nparts['zone2_all']
+        np3 = self.nparts['zone3_all']
+        np_tot = self.nparts['tot_all']
+        print(f"--- Total number of Zone I particles: "
+              f"{np1:,} ({np1**(1/3):.2f}^3, {np1 / np_tot * 100:.2f} %).")
+        print(f"--- Total number of Zone II particles: "
+              f"{np2:,} ({np2**(1/3):.2f}^3, {np2 / np_tot * 100:.2f} %).")
+        print(f"--- Total number of Zone III particles: "
+              f"{np3:,} ({np3**(1/3):.2f}^3, {np3 / np_tot * 100:.2f} %).")
+        if self.config['is_zoom']:
+            np_target = (self.sim_box['num_part_equiv'] *
+                         self.mask_data['high_res_volume'])
+            print(
+                f"--- Target number of particles: "
+                f"{np_target:.2e} ({np_target**(1/3):.2f}^3, "
+                f"{np_target / np_tot * 100:.2f} % of actual total.)"
+            )
+
+        print(f"\n--- Total number of particles: "
+              f"{np_tot:,} ({np_tot**(1/3):.2f}^3)")
+
+        mem_gcells = memstring(gcells['memsize'])
+        mem_parts = memstring(4 * 8 * np_tot)       # 4 * 8 byte / particle
+        print(f"--- Total memory use per rank: {mem_gcells} for gcells, "
+              f"{mem_parts} for particles.")
+        print(f"--- Number of files needed for max "
+              f"{max_parts_per_file:,} particles per file: "
+              f"{int(np.ceil(np_tot / max_parts_per_file))}")
 
     def generate_gcube_particles(self, gcells, parts):
         """
@@ -1098,498 +1401,6 @@ class ParticleLoad:
         if comm_rank == 0:
             print(f"--> Finished generating gcube particles in "
                   f"{time.time() - stime:.3e} sec.")
-
-    def load_mask_file(self):
-        """
-        Load the (previously computed) mask file that defines the zoom region.
-
-        Most of this is only relevant for zoom simulations; for uniform volume
-        ICs we only return (0.5, 0.5, 0.5) as the "centre". For zooms, te mask
-        file should have been generated with the `MakeMask` class in 
-        `make_mask/make_mask.py`; an error is raised if no mask file is
-        specified or if the specified file does not exist.
-                
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        mask_data : dict
-            Dict containing the coordinates and sizes of all mask cells,
-            as well as the extent of their cubic bounding box.
-            ** TODO ** Should also load the box size here.
-
-        centre : ndarray(float) [3]
-            The central point of the mask in the simulation box.
-
-        """
-        stime = time.time()
-        lbox_mpchi = self.sim_box['l_mpchi']
-        mask_file = self.config['mask_file']
-
-        if not self.config['is_zoom']:
-            print(f"Uniform volume simulation, centre: "
-                  f"{self.sim_box['l_mpchi'] * 0.5:.2f} h^-1 Mpc in x/y/z.")
-            return None, np.array((0.5, 0.5, 0.5))
-
-        if comm_rank == 0:
-            if self.config['mask_file'] is None:
-                raise AttributeError(
-                    "You need to specify a mask file for a zoom simulation!"
-                )
-            if not os.path.isfile(mask_file):
-                raise OSError(
-                    f"The specified mask file '{mask_file}' does not exist!")
-
-        # Load data on rank 0 and then distribute to other MPI ranks
-        if comm_rank == 0:
-            mask_data = {}
-            with h5.File(mask_file, 'r') as f:
-                
-                # Centre of the high-res zoom in region
-                centre = np.array(
-                    f['Coordinates'].attrs.get("geo_centre")) / lbox_mpchi
-
-                # Data specifying the mask for the high-res region
-                mask_data['cell_coordinates'] = np.array(
-                    f['Coordinates'][...], dtype='f8') / lbox_mpchi
-                mask_data['cell_size'] = (
-                    f['Coordinates'].attrs.get("grid_cell_width")) / lbox_mpchi
-
-                # Also load the side length of the cube enclosing the mask,
-                # and the volume of the target high-res region (at the
-                # selection redshift).                
-                mask_data['extent'] = (
-                    f['Coordinates'].attrs.get("bounding_length")) / lbox_mpchi
-                mask_data['high_res_volume'] = (
-                    f['Coordinates'].attrs.get("high_res_volume")
-                    / lbox_mpchi**3)
-        else:
-            mask_data = None
-            centre = None
-
-        mask_data = comm.bcast(mask_data)
-        centre = comm.bcast(centre)
-
-        if comm_rank == 0:
-            centre_mpchi = centre * lbox_mpchi 
-            num_mask_cells = mask_data['cell_coordinates'].shape[0]
-            print(f"Finished loading data from mask file "
-                  f"({time.time() - stime:.2e} sec.)")
-            print(f"  Target centre: "
-                  f"{centre[0]:.2f} / {centre[1]:.2f} / {centre[2]:.2f}; "
-                  f"({centre_mpchi[0]:.2f} / {centre_mpchi[1]:.2f} / "
-                  f"{centre_mpchi[2]:.2f}) h^-1 Mpc")
-            print(f"  Bounding side: {mask_data['extent']:.3f} x box length\n"
-                  f"  Number of cells: {num_mask_cells} (cell size: "
-                  f"{mask_data['cell_size'] * lbox_mpchi:.2f} h^-1 Mpc)\n"
-            )
-
-        return mask_data, centre
-
-    def compute_fft_params(self):
-        """
-        Work out what size of FFT grid we need for IC-Gen.
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        fft : dict
-            Dict with three parameters specifying the high-res FFT grid.
-
-        """
-        # VIPs only
-        if comm_rank != 0:
-            return
-
-        n_fft_start = self.extra_params['fft_n_start']
-        f_Nyquist = self.extra_params['fft_min_Nyquist_factor']
-
-        fft = self.compute_fft_highres_grid()
-        print(
-            f"--- HRgrid:\n   c={self.centre}, "
-            f"L_box={self.sim_box['l_mpchi']:.2f} Mpc/h\n"
-            f"L_grid={fft['l_mesh_mpchi']:.2f} Mpc/h, "
-            f"n_eff={fft['n_eff']:.2f} (x2 = {fft['n_eff']*2:.2f})\n"
-            f"FFT buffer fraction="
-            f"{self.extra_params['icgen_fft_to_gcube_ratio']:.2f}"
-        )
-
-        # Find the minimum FFT grid size that is at least a factor
-        # self.fft_min_Nyquist_factor larger than the Nyquist criterion
-        # (i.e. the effective number of particles per dimension) and is a
-        # multiple of n_fft_start
-        n_fft_required = (fft['n_eff'] * f_Nyquist)
-        pow2 = int(np.ceil(np.log(n_fft_required / n_fft_start) / np.log(2)))
-        n_fft = n_fft_start * 2**pow2
-        nyq_ratio = n_fft / fft['n_eff']
-        print(f"Using FFT grid with {n_fft} points per side\n"
-              f"   ({nyq_ratio:.2f} times the target-res Nyquist frequency).")
-
-        fft['n_mesh'] = n_fft
-        return fft
-
-    def compute_fft_highres_grid(self):
-        """Compute the properties of the FFT high-res grid."""
-        if comm_rank != 0:
-            return None
-
-        # Extract the number of particles if the whole box were at target res
-        num_part_box = self.sim_box['num_part_equiv']
-
-        # This is trivial for periodic box simulations
-        if not self.config['is_zoom']:
-            fft_params = {
-                'num_eff': num_part_box,
-                'n_eff': int(np.rint(np.cbrt(num_part_box))),
-                'l_mesh_mpchi': self.sim_box['l_mpchi']
-            }
-            return fft_params
-
-        # Rest is only for "standard" (cubic) zooms        
-        l_mesh = (self.extra_params['icgen_fft_to_gcube_ratio'] *
-                  self.gcube['sidelength'])
-        l_mesh_mpchi = l_mesh * self.sim_box['l_mpchi']
-        if l_mesh > 1.:
-            raise ValueError(
-                f"Buffered zoom region is too big ({l_mesh:.3e})!")
-        num_eff = int(num_part_box * l_mesh**3)
-
-        # How many multi-grid FFT levels (this will update n_eff)?
-        # Unclear whether this actually does anything...
-
-        if self.extra_params['icgen_multigrid'] and l_mesh > 0.5:
-            print(f"*** Cannot use multigrid ICs, mesh region is "
-                  f"{l_mesh:.2f} > 0.5")
-            self.extra_params['icgen_multigrid'] = False
-
-        if self.extra_params['icgen_multigrid']:
-            # Re-calculate size of high-res cube to be a power-of-two
-            # fraction of the simulation box size
-            n_levels = int(np.log(1/l_mesh) / np.log(2))
-            print(f"Direct n_levels: {n_levels}")
-            n_levels = 0
-            while 1 / (2.**(n_levels+1)) > l_mesh:
-                n_levels += 1
-            print(f"Loop n_levels: {n_levels}")
-
-            actual_l_mesh = 1. / (2.**n_levels)
-            actual_l_mesh_mpchi = self.sim_box['l_mpchi'] / (2.**n_levels)
-            if (actual_l_mesh_mpchi < l_mesh_mpchi):
-                raise Exception("Multi-grid l_mesh is too small!")
-
-            actual_num_eff = int(num_part_box * actual_l_mesh**3)
-            
-            print(
-                f"--- HRgrid num multigrids={n_levels}, "
-                f"lowest = {actual_l_mesh_mpchi:.2f} Mpc/h, "
-                f"n_eff = {actual_num_eff**(1/3):.2f}^3 "
-                f"(x2: {2*actual_num_eff**(1/3):.2f}^3)"
-            )
-        
-        fft_highres_grid_params = {
-                'num_eff': num_eff,
-                'n_eff': int(np.rint(np.cbrt(num_eff))), # Exact up to precision
-                'l_mesh_mpchi': l_mesh,
-        }
-        return fft_highres_grid_params
-
-    def get_icgen_core_number(self, fft_params, optimal=False):
-        """
-        Determine number of cores to use based on memory requirements.
-        Number of cores must also be a factor of ndim_fft.
-
-        Parameters
-        ----------
-        fft_params : dict
-            The parameters of the high-res FFT grid
-        optimal : bool
-            Switch to enable an "optimal" number of cores (default: False)
-
-        Returns
-        -------
-        n_cores : int
-            The minimally required number of cores.
-
-        Class attributes stored
-        -----------------------
-        ic_params['icgen_n_cores'] : int
-            The number of cores required for IC-Gen.
-
-        """
-        # For VIPs only.
-        if comm_rank != 0:
-            return
-
-        if optimal:
-            origin = 'optimized'
-            n_max_part, n_max_disp = self.compute_optimal_ic_mem()
-        else:
-            origin = 'default'
-            n_max_part = self.extra_params['icgen_nmaxpart']
-            n_max_disp = self.extra_params['icgen_nmaxdisp']
-        print(f"Using {origin} n_max_part={n_max_part}, "
-              f"n_max_disp={n_max_disp}.")
-
-        n_dim_fft = fft_params['n_mesh']
-        num_cores_per_node = self.extra_params['num_cores_per_node']
-
-        # Find number of cores that satisfies both FFT and particle constraints
-        n_cores_from_fft = int(
-            np.ceil((2*n_dim_fft**2 * (n_dim_fft/2 + 1))) / n_max_disp)
-        n_cores_from_npart = int(np.ceil(self.nparts['tot_all'] / n_max_part))
-        n_cores = max(n_cores_from_fft, n_cores_from_npart)
-
-        # Increase n_cores until n_dim_fft is an integer multiple
-        while (n_dim_fft % n_cores) != 0:
-            n_cores += 1
-  
-        # If we're using one node, try to use as many of the cores as possible
-        # (but still such that ndim_fft is an integer multiple). Since the
-        # starting ncores works, we can safely increase n_fft_per_core
-        if n_cores < num_cores_per_node:
-            n_cores = num_cores_per_node
-            while (n_dim_fft % n_cores) != 0:
-                n_cores -= 1
- 
-        print(f"--- Using {n_cores} cores for IC-gen (minimum need for "
-              f"{n_cores_from_fft} for FFT, {n_cores_from_npart} "
-              f"for particles).")
-        print(f"n_dim_fft = {n_dim_fft}")
-
-        return n_cores
-
-    def compute_optimal_ic_mem(self, n_fft):
-        """
-        Compute the optimal memory to fit IC-Gen on cosma7.
-
-        Parameters
-        ----------
-        n_fft : int
-            The side length of the FFT grid
-
-        Returns
-        -------
-        max_parts : int
-            The maximal number of particles that can be handled per core
-        max_fft : int
-            The maximal number of FFT grid points that can be handled per core
-
-        """
-        bytes_per_particle = 66
-        bytes_per_fft_cell = 20
- 
-        num_parts = self.nparts['tot_all']
-        num_fft = n_fft**3
-        total_memory = ((bytes_per_particle * num_parts) +
-                        (bytes_per_fft_cell * num_fft))
-
-        num_cores = total_memory / self.extra_params['memory_per_core']
-        max_parts = num_parts / num_cores
-        max_fft = num_fft / num_cores
-        print(f"--- Optimal max_parts={max_parts}, max_fft = {max_fft}")
-
-        return max_parts, max_fft
-
-    def make_particle_load(self, only_calc_ntot=False):
-        """
-        Main driver function to generate the particle load.
-
-        For zoom-in simulations, it generates three classes of particles:
-        (i)   those at the target resolution within "Zone I", the volume
-              specified by the pre-defined mask (and generally slightly beyond
-              it).
-        (ii)  medium resolution particles within "Zone II", the remaining
-              volume within a cubic box. These particles have a range of
-              masses depending on how far away they are from Zone I. 
-        (iii) low resolution particles within "Zone III", the remaining
-              volume of the simulation box. Particles again have a range of
-              masses depending on their distance from Zone II.
-
-        For uniform-volume simulations, Zone I always covers the entire box.
-
-        Parameters
-        ----------
-        only_calc_ntot : bool, optional
-            Switch to skip the actual particle generation (default: False).
-
-        Returns
-        -------
-        parts : dict
-            The properties of the generated particles. It has two keys:
-            - pos : ndarray(float) [N_part, 3]
-                The x, y, and z coordinates of the particles generated on the
-                local MPI rank.
-            - m : ndarray(float) [N_part]
-                The masses (in units of the total box mass) of each particle. 
-
-        """
-        if comm_rank == 0:
-            print('\n-------------------------')
-            print('Generating particle load.')
-            print('-------------------------\n')
-
-        # ================================================================
-        #                       Battle plan: 
-        # ----------------------------------------------------------------
-        # 1.) Preparation (compute total box mass, only for log messages)"
-        # 2.) Set up gcell grid and generate local gcells.
-        # 3.) Generate local particles within gcell grid
-        # 4.) Generate low-resolution particles (outside gcell cube)
-        # ================================================================
-
-        # ------- Act I: Setup (may move this out of here) -----------------
-
-        self.mask_data, self.centre = self.load_mask_file()
-
-        # --------------------------------------------------------------------
-        # --- Act II: Preparation (find structure and number of particles) ---
-        # -------------------------------------------------------------------- 
-
-        # Set up the gcube and generate local gcells
-        self.gcube = self.set_up_gcube()
-
-        # Prepare uniform grid cell structure within gcube
-        # (sets up self.gcell_info)
-        gcells = self.generate_gcells()
-
-        # Prepare the cubic shell structure filling the outer box (Zone III)
-        # (sets up self.scube dict)
-        self.prepare_zone3_particles()
-
-        if comm_rank == 0:
-            self.print_particle_load_info(gcells)
-
-        # If this is a "dry run" and we only want the particle number, quit.
-        if only_calc_ntot:
-            return
-
-        # -------------------------------------------------------------------
-        # ------ Act III: Creation (generate and verify particles) ----------
-        # -------------------------------------------------------------------
-
-        # Initiate particle arrays.
-        pos = np.zeros((self.nparts['tot_local'], 3), dtype='f8') - 1e30
-        masses = np.zeros(self.nparts['tot_local'], dtype='f8') - 1
-        parts = {'pos': pos, 'm': masses}
-
-        # Magic, part I: populate local gcells with particles (Zone I/II)
-        self.generate_gcube_particles(gcells, parts)
-         
-        # Magic, part II: populate outer region with particles (Zone III)
-        self.generate_zone3_particles(parts)
-
-        # -------------------------------------------------------------------
-        # --- Act IV: Transformation (shift coordinate system to target) ----
-        # -------------------------------------------------------------------
-
-        # Make sure that the particles are sensible before shifting
-        self.verify_particles(parts)
-
-        # Move particle load to final position in the simulation box
-        self.shift_particles_to_target_position(parts)
-
-        return parts
-
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    # - - - - -  Functions called by make_particle_load - - - - - - - - -
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-    def set_up_gcube(self):
-        """
-        Set up the frame of the gcube.
-
-        This delineates the region filled with high(er) resolution particles,
-        and is centred on the origin (same as the input mask).
-
-        Parameters
-        ----------
-        None (this may change).
-
-        Returns
-        -------
-        gcube : dict
-            Dict specifying the structure of the gcube with the following keys:
-            - ...
-
-        """
-        stime = time.time()
-        gcube = {}
-
-        num_part_box = self.sim_box['num_part_equiv']
-        zone1_gcell_load = self.config['zone1_gcell_load']
-        num_buffer_gcells = self.config['gcube_n_buffer_cells']
-
-        # Find the closest number of gcells that fill the box along one
-        # side length. Recall that num_part_box is already guaranteed
-        # to be (close to) an integer multiple of zone1_gcell_load, so the
-        # rounding here is only to avoid numerical rounding issues.
-        n_base = int(np.rint((num_part_box / zone1_gcell_load)**(1/3)))
-        if (n_base**3 * zone1_gcell_load != num_part_box):
-            raise ValueError(
-                f"Want to use {n_base} cells per dimension, but this would "
-                f"give {n_base**3 * zone1_gcell_load} particles, instead of "
-                f"the target number of {num_part_box} particles."
-            )
-
-        # Side length of one gcell
-        gcube['cell_size_mpchi'] = self.sim_box['l_mpchi'] / n_base
-        gcube['cell_size'] = 1. / n_base   # In sim box size units
-
-        if self.config['is_zoom']:
-            # In this case, we have fewer gcells (in general), but still
-            # use the same size.
-            mask_cube_size = self.mask_data['extent']
-            n_gcells = int(np.ceil(mask_cube_size / gcube['cell_size']))
-            gcube['n_cells'] = n_gcells + num_buffer_gcells * 2
-
-            # Make sure that we don't assign more than the total number of
-            # cells to the high-resolution region
-            if gcube['n_cells'] > n_base:
-                raise ValueError(
-                    f"Cannot assign {gcube['n_cells']} cells per dimension to "
-                    f"gcube if there are only {n_base} cells per "
-                    "dimension in total!"
-                )
-        else:
-            # Simple: whole box filled by high-resolution glass cells.
-            gcube['n_cells'] = n_base
-            mask_cube_size = 1.0
-
-        gcube['num_cells'] = gcube['n_cells']**3
-        if gcube['num_cells'] > (2**32) / 2:          # Dat kan niet.
-            raise Exception(
-                f"Total number of gcells ({gcube['num_cells']}) "
-                f"is too large, can only have up to {(2**32)/2}."
-            )
-
-        # Compute the physical size of the gcube. Note that, for a
-        # zoom simulation, this is generally not the same as the size of the
-        # mask box, because of the applied buffer and quantization.
-        gcube['sidelength_mpchi'] = gcube['cell_size_mpchi'] * gcube['n_cells']
-        gcube['sidelength'] = gcube['cell_size'] * gcube['n_cells']
-        gcube['volume_mpchi'] = gcube['sidelength_mpchi']**3
-        gcube['volume'] = gcube['sidelength']**3
- 
-        if comm_rank == 0:
-            print(
-                f"Finished setting up gcube ({time.time() - stime:.2e} sec.)\n"
-                f"  Side length: {gcube['sidelength_mpchi']:.4f} h^-1 Mpc "
-                f"(= {gcube['sidelength']:.3e} x box size)\n"
-                f"  Volume: {gcube['volume_mpchi']:.4f} (h^-1 Mpc)^3 "
-                f"({gcube['volume'] * 100:.3f} % of the simulation volume,\n      "
-                f"{gcube['volume']/(mask_cube_size**3) * 100:.3f} % "
-                f"of the mask bounding cube)\n"
-                f"  {gcube['n_cells']} gcells per dimension, of size "
-                f"{gcube['cell_size_mpchi']:.3f} Mpc/h\n"
-                f"  {gcube['num_cells']} gcells in total\n"
-            )
-
-        return gcube
 
     def load_glass_files(self):
         """
@@ -1810,222 +1621,7 @@ class ParticleLoad:
                   f"{self.centre[2]:.3f}."
             )
 
-    def create_param_and_submit_files(
-        self, create_param=True, create_submit=True):
-        """
-        Create appropriate parameter and submit files for IC-GEN and SWIFT.
-        """
-        codes = self.extra_params['code_types']
-        print(f"Generate files for codes '{codes}'")
-
-        fft_params = self.compute_fft_params()
-        n_cores_icgen = self.get_icgen_core_number(fft_params, optimal=False)
-        eps = self.compute_softenings()
-
-        all_params = self.compile_param_dict(fft_params, eps, n_cores_icgen)
-
-        if create_param:
-            pr.make_all_param_files(all_params, codes.lower())
-        if create_submit:
-            pr.make_all_submit_files(all_params, codes.lower())
-
-    def compile_param_dict(self, fft_params, eps, n_cores_icgen):
-        """Compile a dict of all parameters required for param/submit files."""
-
-        extra_params = self.extra_params
-        cosmo_h = self.cosmo['hubbleParam']
-        param_dict = {}
-
-        # Compute mass cuts between particle types.
-        cut_type1_type2 = 0.0    # Dummy value if not needed
-        cut_type2_type3 = 0.0    # Dummy value if not needed
-        if self.config['is_zoom']:
-            num_species = extra_params['num_species']
-            if num_species >= 2:
-                cut_type1_type2 = np.log10(
-                    np.mean(self.gcell_info['particle_masses'][0:2]))
-                print(f"log10 mass fraction cut from parttype 1 --> 2 = "
-                      f"{cut_type1_type2:.2f}")
-            if num_species == 3:
-                cut_type2_type3 = np.log10(
-                    (self.gcell_info['particle_masses'][-1] +
-                     self.scube['m_min']) / 2
-                )
-                print(f"log10 mass fraction cut from parttype 2 --> 3 = "
-                      f"{cut_type2_type3:.2f}")
-            if num_species > 3:
-                print(f"NumSpecies > 3 not supported, ignoring extra.")
-
-        centre_mpchi = self.centre * self.sim_box['l_mpchi']
-
-        param_dict['f_name'] = self.config['sim_name']
-        param_dict['box_size_mpchi'] = self.sim_box['l_mpchi'] 
-        param_dict['centre_x_mpchi'] = centre_mpchi[0]
-        param_dict['centre_y_mpchi'] = centre_mpchi[1]
-        param_dict['centre_z_mpchi'] = centre_mpchi[2]
-        param_dict['l_gcube_mpchi'] = self.gcube['sidelength_mpchi']
-        param_dict['is_zoom'] = self.config['is_zoom']
-
-        for key in self.cosmo:
-            param_dict[f'cosmo_{key}'] = self.cosmo[key]
-
-        param_dict['ics_z_init'] = extra_params['z_initial']
-
-        # IC-Gen specific parameters
-        param_dict['icgen_dir'] = self.config['output_dir']
-        param_dict['icgen_n_cores'] = n_cores_icgen
-        param_dict['icgen_runtime_hours'] = extra_params['icgen_runtime_hours']
-        param_dict['icgen_use_PH_ids'] = True
-        param_dict['icgen_PH_nbit'] = extra_params['icgen_PH_nbit']
-        param_dict['icgen_num_species'] = extra_params['num_species']
-        param_dict['icgen_cut_t1t2'] = cut_type1_type2
-        param_dict['icgen_cut_t2t3'] = cut_type2_type3
-        param_dict['icgen_linear_powspec_file'] = (
-            self.cosmo['linear_powerspectrum_file'])
-        param_dict['icgen_panphasian_descriptor'] = (
-            extra_params['panphasian_descriptor'])
-        param_dict['icgen_n_part_for_uniform_box'] = (
-            self.sim_box['num_part_equiv'])
-        for key_suffix in ['', '2', '_path', '_levels', '2_path', '2_levels']:
-            param_dict[f'icgen_constraint_phase_descriptor{key_suffix}'] = (
-            extra_params[f'icgen_constraint_phase_descriptor{key_suffix}'])
-        param_dict['icgen_multigrid'] = extra_params['icgen_multigrid']
-        param_dict['icgen_n_fft_mesh'] = fft_params['n_mesh']
-        param_dict['icgen_highres_num_eff'] = fft_params['num_eff']
-        param_dict['icgen_highres_n_eff'] = fft_params['num_eff']**(1/3)
-        param_dict['icgen_highres_l_mpchi'] = fft_params['l_mesh_mpchi']
-
-        # Simulation-specific parameters
-        param_dict['sim_eps_dm_mpchi'] = eps['dm']
-        param_dict['sim_eps_dm_mpc'] = eps['dm'] / cosmo_h
-        param_dict['sim_eps_to_mips_background'] = (
-            extra_params['background_eps_to_mips_ratio'])
-        param_dict['sim_eps_dm_pmpchi'] = eps['dm_proper']
-        param_dict['sim_eps_dm_pmpc'] = eps['dm_proper'] / cosmo_h
-        param_dict['sim_eps_baryon_mpchi'] = eps['baryons']
-        param_dict['sim_eps_baryon_mpc'] = eps['baryons'] / cosmo_h
-        param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper']
-        param_dict['sim_eps_baryon_pmpc'] = eps['baryons_proper'] / cosmo_h
-        param_dict['sim_aexp_initial'] = 1 / (1 + extra_params['z_initial'])
-        param_dict['sim_aexp_final'] = 1 / (1 + extra_params['z_final'])
-        param_dict['sim_type'] = extra_params['sim_type']
-
-        # SWIFT-specific parameters
-        param_dict['swift_dir'] = extra_params['swift_dir']
-        param_dict['swift_ics_dir'] = extra_params['swift_ics_dir']
-        param_dict['swift_num_nodes'] = extra_params['swift_num_nodes']
-        param_dict['swift_runtime_hours'] = extra_params['swift_runtime_hours']
-        param_dict['swift_exec'] = extra_params['swift_exec']
-        param_dict['swift_gas_splitting_threshold_1e10msun'] = (
-            self.find_gas_splitting_mass())
-    
-        return param_dict       
-
-    def find_gas_splitting_mass(self):
-        """Compute the mass threshold for splitting gas particles."""
-        f_baryon = self.cosmo['OmegaBaryon'] / self.cosmo['Omega0']
-        m_tot_gas = self.sim_box['mass_msun'] * f_baryon
-        m_tot_gas /= (self.cosmo['hubbleParam'] * 1e10)  # to 1e10 M_Sun [no h]
-        return m_tot_gas / self.sim_box['num_part_equiv'] * 4
-
-    def save_submit_files(self, max_boxsize):
-        """
-        Generate submit files.
-
-        **TODO** Complete or remove.
-        """
-        if 'gadget' in self.sim_types:
-            raise Exception(
-                "Creation of GADGET submit files is not yet implemented.")
-
-    def compute_softenings(self, verbose=False) -> dict:
-        """
-        Compute softening lengths, in units of Mpc/h.
-
-        This is not required for the actual particle load generation, only
-        to make the simulation parameter files.
-
-        Returns
-        -------
-        eps : dict
-            A dictionary with four keys: 'dm' and 'baryons' contain the
-            co-moving softening lengths for DM and baryons (the latter is 0
-            for DM-only simulations). 'dm_proper' and 'baryons_proper' contain
-            the corresponding maximal proper softening lengths.
-        """
-        comoving_ratio = self.extra_params['comoving_eps_ratio']
-        proper_ratio = self.extra_params['proper_eps_ratio']
-
-        # Compute mean inter-particle separation (ips), in h^-1 Mpc.
-        mean_ips = self.sim_box['l_mpchi'] / self.sim_box['n_part_equiv']
-
-        # Softening lengths for DM
-        eps_dm = mean_ips * comoving_ratio
-        eps_dm_proper = mean_ips * proper_ratio
-
-        # Softening lengths for baryons
-        if self.extra_params["dm_only_sim"]:
-            eps_baryon = 0.0
-            eps_baryon_proper = 0.0
-        else:
-            # Adjust DM softening lengths according to baryon fraction
-            fac = (self.cosmo['OmegaBaryon'] / self.cosmo['OmegaDM'])**(1/3)
-            eps_baryon = eps_dm * fac
-            eps_baryon_proper = eps_dm_proper * fac
-
-        if comm_rank == 0 and verbose:
-            print(f"Computed softening lengths:")
-            h = self.cosmo['hubbleParam']
-            if not self.extra_params["dm_only_sim"]:
-                print(f"   Comoving softenings: DM={eps_dm:.6f}, "
-                      f"baryons={eps_baryon:.6f} Mpc/h")
-                print(f"   Max proper softenings: DM={eps_dm_proper:.6f}, "
-                      f"baryons={eps_baryon_proper:.6f} Mpc/h")
-            print(f"   Comoving softenings: DM={eps_dm / h:.6f} Mpc, "
-                  f"baryond={eps_baryon / h:.6f} Mpc")
-            print(f"   Max proper softenings: DM={eps_dm_proper / h:.6f} Mpc, "
-                  f"baryons={eps_baryon_proper / h:.6f} Mpc\n")
-
-        eps = {'dm': eps_dm, 'baryons': eps_baryon,
-               'dm_proper': eps_dm_proper, 'baryons_proper': eps_baryon_proper}
-        return eps
-
-    def print_particle_load_info(self, gcells):
-        """Print information about to-be-generated particles (rank 0 only)."""
-        max_parts_per_file = self.config["max_numpart_per_file"]
-
-        if comm_rank != 0:
-            return
-
-        np1 = self.nparts['zone1_all']
-        np2 = self.nparts['zone2_all']
-        np3 = self.nparts['zone3_all']
-        np_tot = self.nparts['tot_all']
-        print(f"--- Total number of Zone I particles: "
-              f"{np1:,} ({np1**(1/3):.2f}^3, {np1 / np_tot * 100:.2f} %).")
-        print(f"--- Total number of Zone II particles: "
-              f"{np2:,} ({np2**(1/3):.2f}^3, {np2 / np_tot * 100:.2f} %).")
-        print(f"--- Total number of Zone III particles: "
-              f"{np3:,} ({np3**(1/3):.2f}^3, {np3 / np_tot * 100:.2f} %).")
-        if self.config['is_zoom']:
-            np_target = (self.sim_box['num_part_equiv'] *
-                         self.mask_data['high_res_volume'])
-            print(
-                f"--- Target number of particles: "
-                f"{np_target:.2e} ({np_target**(1/3):.2f}^3, "
-                f"{np_target / np_tot * 100:.2f} % of actual total.)"
-            )
-
-        print(f"\n--- Total number of particles: "
-              f"{np_tot:,} ({np_tot**(1/3):.2f}^3)")
-
-        mem_gcells = memstring(gcells['memsize'])
-        mem_parts = memstring(4 * 8 * np_tot)       # 4 * 8 byte / particle
-        print(f"--- Total memory use per rank: {mem_gcells} for gcells, "
-              f"{mem_parts} for particles.")
-        print(f"--- Number of files needed for max "
-              f"{max_parts_per_file:,} particles per file: "
-              f"{int(np.ceil(np_tot / max_parts_per_file))}")
+    # ------------- Routines for saving the particle load -------------------
 
     def save_particle_load(self, randomize=False):
         """
@@ -2224,6 +1820,384 @@ class ParticleLoad:
         if comm_rank == 0:
             print(f"Done saving local particles to '{save_loc}'.")
 
+    # ------------- Routines for generating IC_Gen info -------------------
+
+    def create_param_and_submit_files(
+        self, create_param=True, create_submit=True):
+        """
+        Create appropriate parameter and submit files for IC-GEN and SWIFT.
+        """
+        codes = self.extra_params['code_types']
+        print(f"Generate files for codes '{codes}'")
+
+        fft_params = self.compute_fft_params()
+        n_cores_icgen = self.get_icgen_core_number(fft_params, optimal=False)
+        eps = self.compute_softenings()
+
+        all_params = self.compile_param_dict(fft_params, eps, n_cores_icgen)
+
+        if create_param:
+            pr.make_all_param_files(all_params, codes.lower())
+        if create_submit:
+            pr.make_all_submit_files(all_params, codes.lower())
+
+    def compute_fft_params(self):
+        """
+        Work out what size of FFT grid we need for IC-Gen.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        fft : dict
+            Dict with three parameters specifying the high-res FFT grid.
+
+        """
+        # VIPs only
+        if comm_rank != 0:
+            return
+
+        n_fft_start = self.extra_params['fft_n_start']
+        f_Nyquist = self.extra_params['fft_min_Nyquist_factor']
+
+        fft = self.compute_fft_highres_grid()
+        print(
+            f"--- HRgrid:\n   c={self.centre}, "
+            f"L_box={self.sim_box['l_mpchi']:.2f} Mpc/h\n"
+            f"L_grid={fft['l_mesh_mpchi']:.2f} Mpc/h, "
+            f"n_eff={fft['n_eff']:.2f} (x2 = {fft['n_eff']*2:.2f})\n"
+            f"FFT buffer fraction="
+            f"{self.extra_params['icgen_fft_to_gcube_ratio']:.2f}"
+        )
+
+        # Find the minimum FFT grid size that is at least a factor
+        # self.fft_min_Nyquist_factor larger than the Nyquist criterion
+        # (i.e. the effective number of particles per dimension) and is a
+        # multiple of n_fft_start
+        n_fft_required = (fft['n_eff'] * f_Nyquist)
+        pow2 = int(np.ceil(np.log(n_fft_required / n_fft_start) / np.log(2)))
+        n_fft = n_fft_start * 2**pow2
+        nyq_ratio = n_fft / fft['n_eff']
+        print(f"Using FFT grid with {n_fft} points per side\n"
+              f"   ({nyq_ratio:.2f} times the target-res Nyquist frequency).")
+
+        fft['n_mesh'] = n_fft
+        return fft
+
+    def compute_fft_highres_grid(self):
+        """Compute the properties of the FFT high-res grid."""
+        if comm_rank != 0:
+            return None
+
+        # Extract the number of particles if the whole box were at target res
+        num_part_box = self.sim_box['num_part_equiv']
+
+        # This is trivial for periodic box simulations
+        if not self.config['is_zoom']:
+            fft_params = {
+                'num_eff': num_part_box,
+                'n_eff': int(np.rint(np.cbrt(num_part_box))),
+                'l_mesh_mpchi': self.sim_box['l_mpchi']
+            }
+            return fft_params
+
+        # Rest is only for "standard" (cubic) zooms        
+        l_mesh = (self.extra_params['icgen_fft_to_gcube_ratio'] *
+                  self.gcube['sidelength'])
+        l_mesh_mpchi = l_mesh * self.sim_box['l_mpchi']
+        if l_mesh > 1.:
+            raise ValueError(
+                f"Buffered zoom region is too big ({l_mesh:.3e})!")
+        num_eff = int(num_part_box * l_mesh**3)
+
+        # How many multi-grid FFT levels (this will update n_eff)?
+        # Unclear whether this actually does anything...
+
+        if self.extra_params['icgen_multigrid'] and l_mesh > 0.5:
+            print(f"*** Cannot use multigrid ICs, mesh region is "
+                  f"{l_mesh:.2f} > 0.5")
+            self.extra_params['icgen_multigrid'] = False
+
+        if self.extra_params['icgen_multigrid']:
+            # Re-calculate size of high-res cube to be a power-of-two
+            # fraction of the simulation box size
+            n_levels = int(np.log(1/l_mesh) / np.log(2))
+            print(f"Direct n_levels: {n_levels}")
+            n_levels = 0
+            while 1 / (2.**(n_levels+1)) > l_mesh:
+                n_levels += 1
+            print(f"Loop n_levels: {n_levels}")
+
+            actual_l_mesh = 1. / (2.**n_levels)
+            actual_l_mesh_mpchi = self.sim_box['l_mpchi'] / (2.**n_levels)
+            if (actual_l_mesh_mpchi < l_mesh_mpchi):
+                raise Exception("Multi-grid l_mesh is too small!")
+
+            actual_num_eff = int(num_part_box * actual_l_mesh**3)
+            
+            print(
+                f"--- HRgrid num multigrids={n_levels}, "
+                f"lowest = {actual_l_mesh_mpchi:.2f} Mpc/h, "
+                f"n_eff = {actual_num_eff**(1/3):.2f}^3 "
+                f"(x2: {2*actual_num_eff**(1/3):.2f}^3)"
+            )
+        
+        fft_highres_grid_params = {
+                'num_eff': num_eff,
+                'n_eff': int(np.rint(np.cbrt(num_eff))), # Exact up to precision
+                'l_mesh_mpchi': l_mesh,
+        }
+        return fft_highres_grid_params
+
+    def get_icgen_core_number(self, fft_params, optimal=False):
+        """
+        Determine number of cores to use based on memory requirements.
+        Number of cores must also be a factor of ndim_fft.
+
+        Parameters
+        ----------
+        fft_params : dict
+            The parameters of the high-res FFT grid
+        optimal : bool
+            Switch to enable an "optimal" number of cores (default: False)
+
+        Returns
+        -------
+        n_cores : int
+            The minimally required number of cores.
+
+        Class attributes stored
+        -----------------------
+        ic_params['icgen_n_cores'] : int
+            The number of cores required for IC-Gen.
+
+        """
+        # For VIPs only.
+        if comm_rank != 0:
+            return
+
+        if optimal:
+            origin = 'optimized'
+            n_max_part, n_max_disp = self.compute_optimal_ic_mem()
+        else:
+            origin = 'default'
+            n_max_part = self.extra_params['icgen_nmaxpart']
+            n_max_disp = self.extra_params['icgen_nmaxdisp']
+        print(f"Using {origin} n_max_part={n_max_part}, "
+              f"n_max_disp={n_max_disp}.")
+
+        n_dim_fft = fft_params['n_mesh']
+        num_cores_per_node = self.extra_params['num_cores_per_node']
+
+        # Find number of cores that satisfies both FFT and particle constraints
+        n_cores_from_fft = int(
+            np.ceil((2*n_dim_fft**2 * (n_dim_fft/2 + 1))) / n_max_disp)
+        n_cores_from_npart = int(np.ceil(self.nparts['tot_all'] / n_max_part))
+        n_cores = max(n_cores_from_fft, n_cores_from_npart)
+
+        # Increase n_cores until n_dim_fft is an integer multiple
+        while (n_dim_fft % n_cores) != 0:
+            n_cores += 1
+  
+        # If we're using one node, try to use as many of the cores as possible
+        # (but still such that ndim_fft is an integer multiple). Since the
+        # starting ncores works, we can safely increase n_fft_per_core
+        if n_cores < num_cores_per_node:
+            n_cores = num_cores_per_node
+            while (n_dim_fft % n_cores) != 0:
+                n_cores -= 1
+ 
+        print(f"--- Using {n_cores} cores for IC-gen (minimum need for "
+              f"{n_cores_from_fft} for FFT, {n_cores_from_npart} "
+              f"for particles).")
+        print(f"n_dim_fft = {n_dim_fft}")
+
+        return n_cores
+
+    def compute_optimal_ic_mem(self, n_fft):
+        """
+        Compute the optimal memory to fit IC-Gen on cosma7.
+
+        Parameters
+        ----------
+        n_fft : int
+            The side length of the FFT grid
+
+        Returns
+        -------
+        max_parts : int
+            The maximal number of particles that can be handled per core
+        max_fft : int
+            The maximal number of FFT grid points that can be handled per core
+
+        """
+        bytes_per_particle = 66
+        bytes_per_fft_cell = 20
+ 
+        num_parts = self.nparts['tot_all']
+        num_fft = n_fft**3
+        total_memory = ((bytes_per_particle * num_parts) +
+                        (bytes_per_fft_cell * num_fft))
+
+        num_cores = total_memory / self.extra_params['memory_per_core']
+        max_parts = num_parts / num_cores
+        max_fft = num_fft / num_cores
+        print(f"--- Optimal max_parts={max_parts}, max_fft = {max_fft}")
+
+        return max_parts, max_fft
+
+    def compute_softenings(self, verbose=False) -> dict:
+        """
+        Compute softening lengths, in units of Mpc/h.
+
+        This is not required for the actual particle load generation, only
+        to make the simulation parameter files.
+
+        Returns
+        -------
+        eps : dict
+            A dictionary with four keys: 'dm' and 'baryons' contain the
+            co-moving softening lengths for DM and baryons (the latter is 0
+            for DM-only simulations). 'dm_proper' and 'baryons_proper' contain
+            the corresponding maximal proper softening lengths.
+        """
+        comoving_ratio = self.extra_params['comoving_eps_ratio']
+        proper_ratio = self.extra_params['proper_eps_ratio']
+
+        # Compute mean inter-particle separation (ips), in h^-1 Mpc.
+        mean_ips = self.sim_box['l_mpchi'] / self.sim_box['n_part_equiv']
+
+        # Softening lengths for DM
+        eps_dm = mean_ips * comoving_ratio
+        eps_dm_proper = mean_ips * proper_ratio
+
+        # Softening lengths for baryons
+        if self.extra_params["dm_only_sim"]:
+            eps_baryon = 0.0
+            eps_baryon_proper = 0.0
+        else:
+            # Adjust DM softening lengths according to baryon fraction
+            fac = (self.cosmo['OmegaBaryon'] / self.cosmo['OmegaDM'])**(1/3)
+            eps_baryon = eps_dm * fac
+            eps_baryon_proper = eps_dm_proper * fac
+
+        if comm_rank == 0 and verbose:
+            print(f"Computed softening lengths:")
+            h = self.cosmo['hubbleParam']
+            if not self.extra_params["dm_only_sim"]:
+                print(f"   Comoving softenings: DM={eps_dm:.6f}, "
+                      f"baryons={eps_baryon:.6f} Mpc/h")
+                print(f"   Max proper softenings: DM={eps_dm_proper:.6f}, "
+                      f"baryons={eps_baryon_proper:.6f} Mpc/h")
+            print(f"   Comoving softenings: DM={eps_dm / h:.6f} Mpc, "
+                  f"baryond={eps_baryon / h:.6f} Mpc")
+            print(f"   Max proper softenings: DM={eps_dm_proper / h:.6f} Mpc, "
+                  f"baryons={eps_baryon_proper / h:.6f} Mpc\n")
+
+        eps = {'dm': eps_dm, 'baryons': eps_baryon,
+               'dm_proper': eps_dm_proper, 'baryons_proper': eps_baryon_proper}
+        return eps
+
+    def compile_param_dict(self, fft_params, eps, n_cores_icgen):
+        """Compile a dict of all parameters required for param/submit files."""
+
+        extra_params = self.extra_params
+        cosmo_h = self.cosmo['hubbleParam']
+        param_dict = {}
+
+        # Compute mass cuts between particle types.
+        cut_type1_type2 = 0.0    # Dummy value if not needed
+        cut_type2_type3 = 0.0    # Dummy value if not needed
+        if self.config['is_zoom']:
+            num_species = extra_params['num_species']
+            if num_species >= 2:
+                cut_type1_type2 = np.log10(
+                    np.mean(self.gcell_info['particle_masses'][0:2]))
+                print(f"log10 mass fraction cut from parttype 1 --> 2 = "
+                      f"{cut_type1_type2:.2f}")
+            if num_species == 3:
+                cut_type2_type3 = np.log10(
+                    (self.gcell_info['particle_masses'][-1] +
+                     self.scube['m_min']) / 2
+                )
+                print(f"log10 mass fraction cut from parttype 2 --> 3 = "
+                      f"{cut_type2_type3:.2f}")
+            if num_species > 3:
+                print(f"NumSpecies > 3 not supported, ignoring extra.")
+
+        centre_mpchi = self.centre * self.sim_box['l_mpchi']
+
+        param_dict['f_name'] = self.config['sim_name']
+        param_dict['box_size_mpchi'] = self.sim_box['l_mpchi'] 
+        param_dict['centre_x_mpchi'] = centre_mpchi[0]
+        param_dict['centre_y_mpchi'] = centre_mpchi[1]
+        param_dict['centre_z_mpchi'] = centre_mpchi[2]
+        param_dict['l_gcube_mpchi'] = self.gcube['sidelength_mpchi']
+        param_dict['is_zoom'] = self.config['is_zoom']
+
+        for key in self.cosmo:
+            param_dict[f'cosmo_{key}'] = self.cosmo[key]
+
+        param_dict['ics_z_init'] = extra_params['z_initial']
+
+        # IC-Gen specific parameters
+        param_dict['icgen_dir'] = self.config['output_dir']
+        param_dict['icgen_n_cores'] = n_cores_icgen
+        param_dict['icgen_runtime_hours'] = extra_params['icgen_runtime_hours']
+        param_dict['icgen_use_PH_ids'] = True
+        param_dict['icgen_PH_nbit'] = extra_params['icgen_PH_nbit']
+        param_dict['icgen_num_species'] = extra_params['num_species']
+        param_dict['icgen_cut_t1t2'] = cut_type1_type2
+        param_dict['icgen_cut_t2t3'] = cut_type2_type3
+        param_dict['icgen_linear_powspec_file'] = (
+            self.cosmo['linear_powerspectrum_file'])
+        param_dict['icgen_panphasian_descriptor'] = (
+            extra_params['panphasian_descriptor'])
+        param_dict['icgen_n_part_for_uniform_box'] = (
+            self.sim_box['num_part_equiv'])
+        for key_suffix in ['', '2', '_path', '_levels', '2_path', '2_levels']:
+            param_dict[f'icgen_constraint_phase_descriptor{key_suffix}'] = (
+            extra_params[f'icgen_constraint_phase_descriptor{key_suffix}'])
+        param_dict['icgen_multigrid'] = extra_params['icgen_multigrid']
+        param_dict['icgen_n_fft_mesh'] = fft_params['n_mesh']
+        param_dict['icgen_highres_num_eff'] = fft_params['num_eff']
+        param_dict['icgen_highres_n_eff'] = fft_params['num_eff']**(1/3)
+        param_dict['icgen_highres_l_mpchi'] = fft_params['l_mesh_mpchi']
+
+        # Simulation-specific parameters
+        param_dict['sim_eps_dm_mpchi'] = eps['dm']
+        param_dict['sim_eps_dm_mpc'] = eps['dm'] / cosmo_h
+        param_dict['sim_eps_to_mips_background'] = (
+            extra_params['background_eps_to_mips_ratio'])
+        param_dict['sim_eps_dm_pmpchi'] = eps['dm_proper']
+        param_dict['sim_eps_dm_pmpc'] = eps['dm_proper'] / cosmo_h
+        param_dict['sim_eps_baryon_mpchi'] = eps['baryons']
+        param_dict['sim_eps_baryon_mpc'] = eps['baryons'] / cosmo_h
+        param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper']
+        param_dict['sim_eps_baryon_pmpc'] = eps['baryons_proper'] / cosmo_h
+        param_dict['sim_aexp_initial'] = 1 / (1 + extra_params['z_initial'])
+        param_dict['sim_aexp_final'] = 1 / (1 + extra_params['z_final'])
+        param_dict['sim_type'] = extra_params['sim_type']
+
+        # SWIFT-specific parameters
+        param_dict['swift_dir'] = extra_params['swift_dir']
+        param_dict['swift_ics_dir'] = extra_params['swift_ics_dir']
+        param_dict['swift_num_nodes'] = extra_params['swift_num_nodes']
+        param_dict['swift_runtime_hours'] = extra_params['swift_runtime_hours']
+        param_dict['swift_exec'] = extra_params['swift_exec']
+        param_dict['swift_gas_splitting_threshold_1e10msun'] = (
+            self.find_gas_splitting_mass())
+    
+        return param_dict       
+
+    def find_gas_splitting_mass(self):
+        """Compute the mass threshold for splitting gas particles."""
+        f_baryon = self.cosmo['OmegaBaryon'] / self.cosmo['Omega0']
+        m_tot_gas = self.sim_box['mass_msun'] * f_baryon
+        m_tot_gas /= (self.cosmo['hubbleParam'] * 1e10)  # to 1e10 M_Sun [no h]
+        return m_tot_gas / self.sim_box['num_part_equiv'] * 4
 
 # ---------------------------------------------------------------------------
 
