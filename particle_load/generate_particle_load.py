@@ -71,6 +71,7 @@ class ParticleLoad:
         # Read and process the parameter file.
         self.read_param_file(param_file)
         self.sim_box = self.initialize_sim_box()
+        self.mask_data, self.centre = self.load_mask_file()
 
         self.compute_box_mass()
         self.get_target_resolution()
@@ -78,7 +79,6 @@ class ParticleLoad:
         # Generate particle load.
         self.nparts = {}
         self.scube = {}
-        self.mask_data, self.centre = self.load_mask_file()
         self.parts = self.make_particle_load(only_calc_ntot=only_calc_ntot)
 
         # Generate param and submit files, if desired (NOT YET IMPLEMENTED).
@@ -251,10 +251,13 @@ class ParticleLoad:
 
     def initialize_sim_box(self):
         """Initialize the structure to hold info about full simulation box."""
-        sim_box = {
-            'l_mpchi': self.config['box_size'],
-            'volume_mpchi': self.config['box_size']**3
-        }
+        sim_box = {}
+
+        # For zooms, we will load the box size from the mask file in a moment.
+        if not self.config['is_zoom']:
+            sim_box['l_mpchi'] = self.config['box_size']
+            sim_box['volume_mpchi'] = self.config['box_size']**3
+
         return sim_box
 
     def compute_box_mass(self):
@@ -373,8 +376,9 @@ class ParticleLoad:
             with h5.File(mask_file, 'r') as f:
                 
                 # Centre of the high-res zoom in region
-                lbox_mpchi = f['Coordinates'].attrs.get['box_size']
+                lbox_mpchi = f['Coordinates'].attrs.get('box_size')
                 self.sim_box['l_mpchi'] = lbox_mpchi
+                self.sim_box['volume_mpchi'] = lbox_mpchi**3
 
                 centre = np.array(
                     f['Coordinates'].attrs.get("geo_centre")) / lbox_mpchi
