@@ -2061,9 +2061,11 @@ class ParticleLoad:
             if comm_rank == 0:
                 print('Randomizing arrays...')
             idx = np.random.permutation(self.nparts['tot_local'])
-            parts['pos'] = parts['pos'][idx, :]
-            parts['m'] = parts['m'][idx]
+            self.parts['pos'] = self.parts['pos'][idx, :]
+            self.parts['m'] = self.parts['m'][idx]
 
+        self.parts['m'][:10000] *= (-1)
+            
         # Load balance across MPI ranks.
         self.repartition_particles()
 
