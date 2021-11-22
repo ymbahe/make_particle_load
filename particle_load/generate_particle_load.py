@@ -266,7 +266,6 @@ class ParticleLoad:
         if not self.config['is_zoom']:
             sim_box['l_mpchi'] = self.config['box_size']
             sim_box['l_mpc'] = self.config['box_size'] / h
-            sim_box['volume_mpchi'] = sim_box['l_mpchi']**3
             sim_box['volume_mpc'] = sim_box['l_mpc']**3
 
         return sim_box
@@ -389,7 +388,6 @@ class ParticleLoad:
                 lbox_mpc = f['Coordinates'].attrs.get('box_size')
                 self.sim_box['l_mpc'] = lbox_mpc
                 self.sim_box['l_mpchi'] = lbox_mpc * self.cosmo['hubbleParam']
-                self.sim_box['volume_mpchi'] = self.sim_box['l_mpchi']**3
                 self.sim_box['volume_mpc'] = self.sim_box['l_mpc']**3
 
                 centre = np.array(
@@ -559,6 +557,7 @@ class ParticleLoad:
 
         # Side length of one gcell
         gcube['cell_size_mpchi'] = self.sim_box['l_mpchi'] / n_base
+        gcube['cell_size_mpc'] = self.sim_box['l_mpc'] / n_base
         gcube['cell_size'] = 1. / n_base   # In sim box size units
 
         if self.config['is_zoom']:
@@ -591,22 +590,22 @@ class ParticleLoad:
         # Compute the physical size of the gcube. Note that, for a
         # zoom simulation, this is generally not the same as the size of the
         # mask box, because of the applied buffer and quantization.
-        gcube['sidelength_mpchi'] = gcube['cell_size_mpchi'] * gcube['n_cells']
+        gcube['sidelength_mpc'] = gcube['cell_size_mpc'] * gcube['n_cells']
         gcube['sidelength'] = gcube['cell_size'] * gcube['n_cells']
-        gcube['volume_mpchi'] = gcube['sidelength_mpchi']**3
+        gcube['volume_mpc'] = gcube['sidelength_mpc']**3
         gcube['volume'] = gcube['sidelength']**3
  
         if comm_rank == 0:
             print(
                 f"Finished setting up gcube ({time.time() - stime:.2e} sec.)\n"
-                f"  Side length: {gcube['sidelength_mpchi']:.4f} h^-1 Mpc "
+                f"  Side length: {gcube['sidelength_mpc']:.4f} Mpc "
                 f"(= {gcube['sidelength']:.3e} x box size)\n"
-                f"  Volume: {gcube['volume_mpchi']:.4f} (h^-1 Mpc)^3 "
+                f"  Volume: {gcube['volume_mpc']:.4f} Mpc^3 "
                 f"({gcube['volume'] * 100:.3f} % of the simulation volume,\n      "
                 f"{gcube['volume']/(mask_cube_size**3) * 100:.3f} % "
                 f"of the mask bounding cube)\n"
                 f"  {gcube['n_cells']} gcells per dimension, of size "
-                f"{gcube['cell_size_mpchi']:.3f} Mpc/h\n"
+                f"{gcube['cell_size_mpc']:.3f} Mpc\n"
                 f"  {gcube['num_cells']} gcells in total\n"
             )
 
@@ -2324,7 +2323,7 @@ class ParticleLoad:
         param_dict['centre_x_mpchi'] = centre_mpchi[0]
         param_dict['centre_y_mpchi'] = centre_mpchi[1]
         param_dict['centre_z_mpchi'] = centre_mpchi[2]
-        param_dict['l_gcube_mpchi'] = self.gcube['sidelength_mpchi']
+        param_dict['l_gcube_mpchi'] = self.gcube['sidelength_mpc'] * cosmo_h
         param_dict['is_zoom'] = self.config['is_zoom']
 
         for key in self.cosmo:
