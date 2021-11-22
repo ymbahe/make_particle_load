@@ -197,7 +197,6 @@ def fill_scube_layers(dict scube, dict nparts,
 
     # Loop over shells inside out and add particles (if assigned to this rank)
     for ishell in range(n_shells):
-        if ishell % comm_size != comm_rank: continue
         
         if ishell == n_shells - 1:
             n_scells += n_extra
@@ -211,6 +210,9 @@ def fill_scube_layers(dict scube, dict nparts,
         m = scell_size**3
         if ishell == n_shells - 1:
             m += leap_mass
+        scube['particle_masses'][ishell] = m
+
+        if ishell % comm_size != comm_rank: continue
 
         # Add the individual particles in this shell.
         # Looping over the full cube and only processing the outer shell turns

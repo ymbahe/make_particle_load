@@ -64,6 +64,7 @@ class ParticleLoad:
     def __init__(self, param_file: str,
                  randomize: bool = False, only_calc_ntot: bool = False,
                  verbose: bool = False, save_data: bool = True,
+                 save_metadata: bool = True,
                  create_param_files: bool = True,
                  create_submit_files: bool = True
     ) -> None:
@@ -93,6 +94,8 @@ class ParticleLoad:
         # Save particle load
         if save_data:
             self.save_particle_load(randomize=randomize)
+        if save_metadata:
+            self.save_metadata()
 
     def read_param_file(self, param_file: str) -> None:
         """Read in parameters for run."""
@@ -383,6 +386,7 @@ class ParticleLoad:
                 # Centre of the high-res zoom in region
                 lbox_mpchi = f['Coordinates'].attrs.get('box_size')
                 self.sim_box['l_mpchi'] = lbox_mpchi
+                self.sim_box['l_mpc'] = lbox_mpchi / self.cosmo['hubbleParam']
                 self.sim_box['volume_mpchi'] = lbox_mpchi**3
 
                 centre = np.array(
@@ -992,6 +996,7 @@ class ParticleLoad:
         self.scube['volume'] = v_tot[ind_best] - gcube_length**3
         self.scube['delta_volume_fraction'] = v_diff[ind_best]
         self.scube['l_ratio'] = n[ind_best] / (n[ind_best] - 2)
+        self.scube['particle_masses'] = np.zeros(self.scube['n_shells']) - 1
 
         # Sanity checks
         if (self.scube['base_shell_l_inner'] *
@@ -1014,7 +1019,6 @@ class ParticleLoad:
         num_shells_local = tot_nshells // comm_size
         if comm_rank < tot_nshells % comm_size:
             num_shells_local += 1
-        self.scube['n_shells_local'] = num_shells_local    # Can probably go
 
         # Do we get the outermost shell?
         have_outer_shell = (tot_nshells - 1) % comm_size == comm_rank
@@ -1033,10 +1037,13 @@ class ParticleLoad:
         self.scube['m_min'] = (
             self.scube['base_shell_l_inner'] / (self.scube['n_cells'] - 2))**3
 
+        # Find mass in outermost shell. N.B.: need to base this on inner
+        # size, since the outer size of that shell does in general not
+        # increase by the same factor (unless n_extra = 0)
         scell_size_outer = (
             self.scube['base_shell_l_inner'] *
-            self.scube['l_ratio']**self.scube['n_shells'] /
-            (self.scube['n_cells'] + self.scube['n_extra'])
+            self.scube['l_ratio']**(self.scube['n_shells'] - 1) /
+            (self.scube['n_cells'] + self.scube['n_extra'] - 2)
         )
         self.scube['m_max'] = scell_size_outer**3 + self.scube['leap_mass']
 
@@ -1112,7 +1119,6 @@ class ParticleLoad:
         gcell_info = {
             'num_parts_per_cell': np.zeros(num_gcell_types, dtype=int) - 1,
             'particle_masses': np.zeros(num_gcell_types) - 1,
-            'total_masses': np.zeros(num_gcell_types) - 1,
             'num_cells': np.zeros(num_gcell_types, dtype=int) - 1,
             'num_types': num_gcell_types
         }
@@ -1370,9 +1376,14 @@ class ParticleLoad:
 
             if not self.config['identify_gas'] or itype > 0:
                 kernel_masses = np.zeros(gcell_load_type) + particle_mass_type
+                if itype == 0:
+                    self.gcell_info['zone1_m_dm'] = particle_mass_type
+                    self.gcell_info['zone1_m_gas'] = None
             else:
                 # We assign gas particles right here
                 kernel_masses, mass_ptypes = self.identify_gas(gcell_load_type)
+                self.gcell_info['zone1_m_dm'] = mass_ptypes['dm']
+                self.gcell_info['zone1_m_gas'] = mass_ptypes['gas']
 
             cy.fill_gcells_with_particles(
                 gcells['pos'][ind_type, :], kernel, parts['pos'],
@@ -1461,8 +1472,9 @@ class ParticleLoad:
         masses : ndarray(float)
             The masses (in units of the total box mass) of each particle in
             the kernel.
-        mass_ptypes : (float, float)
-            The masses for gas and DM particles, respectively.
+        mass_ptypes : dict
+            The masses for 'gas' and 'dm' particles, respectively (under these
+            keys).
 
         """
         # Find total mass in DM and baryons in a gcell
@@ -1510,8 +1522,7 @@ class ParticleLoad:
         kernel_masses[ind_dm] = m_dm
         kernel_masses[ind_gas] = m_gas
 
-        return kernel_masses, (m_dm, m_gas)
-
+        return kernel_masses, {'dm': m_dm, 'gas': m_gas}
 
     def _verify_gcube_region(self, parts, nparts_created, gvolume):
         """
@@ -1926,6 +1937,76 @@ class ParticleLoad:
 
         if comm_rank == 0:
             print(f"Done saving local particles to '{save_loc}'.")
+
+    def save_metadata(self):
+        """Save the metadata to an HDF5 file."""
+        if comm_rank != 0:
+            return
+
+        save_loc = (f"{self.config['output_dir']}/ic_gen_submit_files/"
+                    f"{self.config['sim_name']}/particle_load_info.hdf5")
+        m_to_msun = self.sim_box['mass_msun']
+        descr_m = (
+            "Particle masses at each level in this zone, in units of the "
+            "total simulation box mass.")
+        descr_m_msun = (
+            "Particle masses at each level in this zone, in units of M_Sun.")
+
+        with h5.File(save_loc, 'w') as f:
+            g = f.create_group('Header')
+            g.attrs.create('NumPart_total', self.nparts['tot_all'])
+            g.attrs.create('NumPart_per_zone',
+                           np.array((self.nparts['zone1_all'],
+                                     self.nparts['zone2_all'],
+                                     self.nparts['zone3_all']))
+            )
+            g.attrs.create('SimulationBoxLength_Mpc', self.sim_box['l_mpc'])
+            g.attrs.create('SimulationMass_MSun', self.sim_box['mass_msun'])
+            g.attrs.create('NumPart_Equiv', self.sim_box['num_part_equiv'])
+            g.attrs.create('N_Part_Equiv', self.sim_box['n_part_equiv'])
+
+            g = f.create_group('ZoneI')
+            ds = g.create_dataset(
+                'DMO_ParticleMasses',
+                data=self.gcell_info['particle_masses'][0:1])
+            ds.attrs.create('Description', descr_m)
+            ds.attrs.create('m_dm', self.gcell_info['zone1_m_dm'])
+            ds.attrs.create('m_gas', self.gcell_info['zone1_m_gas'])
+
+            ds = g.create_dataset(
+                'DMO_ParticleMasses_MSun',
+                data=self.gcell_info['particle_masses'][0:1] * m_to_msun)
+            ds.attrs.create('Description', descr_m_msun)
+            ds.attrs.create('m_dm', self.gcell_info['zone1_m_dm'] * m_to_msun)
+            ds.attrs.create(
+                'm_gas', self.gcell_info['zone1_m_gas'] * m_to_msun)
+
+            g = f.create_group('ZoneII')
+            ds = g.create_dataset(
+                'DMO_ParticleMasses',
+                data=self.gcell_info['particle_masses'][1:])
+            ds.attrs.create('Description', descr_m)
+            ds = g.create_dataset(
+                'DMO_ParticleMasses_MSun',
+                data=self.gcell_info['particle_masses'][1:] * m_to_msun)
+            ds.attrs.create('Description', descr_m_msun)
+
+            g = f.create_group('ZoneIII')
+            g.attrs.create('N_Cells', self.scube['n_cells'])
+            g.attrs.create(
+                'N_Cells_Outer', self.scube['n_cells'] + self.scube['n_extra'])
+            g.attrs.create('N_Shells', self.scube['n_shells'])
+
+            ds = g.create_dataset('DMO_ParticleMasses',
+                                  data=self.scube['particle_masses'])
+            ds.attrs.create('Description', descr_m)
+            ds = g.create_dataset(
+                'DMO_ParticleMasses_MSun',
+                data=self.scube['particle_masses'] * m_to_msun)
+            ds.attrs.create('Description', descr_m_msun)
+            ds.attrs.create('LeapMass', self.scube['leap_mass'])
+
+        print(f"Saved particle load metadata to '{save_loc}'.")
 
     # ------------- Routines for generating IC_Gen info -------------------
 
