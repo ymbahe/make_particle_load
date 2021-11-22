@@ -259,12 +259,15 @@ class ParticleLoad:
 
     def initialize_sim_box(self):
         """Initialize the structure to hold info about full simulation box."""
-        sim_box = {}
+        h = self.cosmo['hubbleParam']
 
+        sim_box = {}
         # For zooms, we will load the box size from the mask file in a moment.
         if not self.config['is_zoom']:
             sim_box['l_mpchi'] = self.config['box_size']
-            sim_box['volume_mpchi'] = self.config['box_size']**3
+            sim_box['l_mpc'] = self.config['box_size'] / h
+            sim_box['volume_mpchi'] = sim_box['l_mpchi']**3
+            sim_box['volume_mpc'] = sim_box['l_mpc']**3
 
         return sim_box
 
@@ -274,14 +277,11 @@ class ParticleLoad:
             h = self.cosmo['hubbleParam']
             omega0 = self.cosmo['Omega0']
             omega_baryon = self.cosmo['OmegaBaryon']
-
             cosmo = FlatLambdaCDM(
                 H0=h*100., Om0=omega0, Ob0=omega_baryon)
+
             rho_crit = cosmo.critical_density0.to(u.solMass / u.Mpc ** 3).value
-
-            box_volume = self.sim_box['volume_mpchi'] / h
-            m_tot = omega0 * rho_crit * box_volume
-
+            m_tot = omega0 * rho_crit * self.sim_box['volume_mpc']
         else:
             m_tot = None
 
@@ -355,8 +355,6 @@ class ParticleLoad:
         mask_data : dict
             Dict containing the coordinates and sizes of all mask cells,
             as well as the extent of their cubic bounding box.
-            ** TODO ** Should also load the box size here.
-
         centre : ndarray(float) [3]
             The central point of the mask in the simulation box.
 
@@ -388,6 +386,7 @@ class ParticleLoad:
                 self.sim_box['l_mpchi'] = lbox_mpchi
                 self.sim_box['l_mpc'] = lbox_mpchi / self.cosmo['hubbleParam']
                 self.sim_box['volume_mpchi'] = lbox_mpchi**3
+                self.sim_box['volume_mpc'] = self.sim_box['l_mpc']**3
 
                 centre = np.array(
                     f['Coordinates'].attrs.get("geo_centre")) / lbox_mpchi
