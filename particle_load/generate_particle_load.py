@@ -389,7 +389,7 @@ class ParticleLoad:
                 lbox_mpc = f['Coordinates'].attrs.get('box_size')
                 self.sim_box['l_mpc'] = lbox_mpc
                 self.sim_box['l_mpchi'] = lbox_mpc * self.cosmo['hubbleParam']
-                self.sim_box['volume_mpchi'] = lbox_mpchi**3
+                self.sim_box['volume_mpchi'] = self.sim_box['l_mpchi']**3
                 self.sim_box['volume_mpc'] = self.sim_box['l_mpc']**3
 
                 centre = np.array(
@@ -418,7 +418,7 @@ class ParticleLoad:
         centre = comm.bcast(centre)
 
         if comm_rank == 0:
-            centre_mpchi = centre * lbox_mpchi 
+            centre_mpc = centre * lbox_mpc 
             num_mask_cells = mask_data['cell_coordinates'].shape[0]
             print(f"Finished loading data from mask file "
                   f"({time.time() - stime:.2e} sec.)")

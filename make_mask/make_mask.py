@@ -482,10 +482,10 @@ class MakeMask:
 
         print(
             f"Encompassing dimensions:\n"
-            f"\tx = {self.mask_widths[0]:.4f} Mpc/h\n"
-            f"\ty = {self.mask_widths[1]:.4f} Mpc/h\n"
-            f"\tz = {self.mask_widths[2]:.4f} Mpc/h\n"
-            f"Bounding length: {self.mask_extent:.4f} Mpc/h")
+            f"\tx = {self.mask_widths[0]:.4f} Mpc\n"
+            f"\ty = {self.mask_widths[1]:.4f} Mpc\n"
+            f"\tz = {self.mask_widths[2]:.4f} Mpc\n"
+            f"Bounding length: {self.mask_extent:.4f} Mpc")
 
         box_volume = np.prod(self.mask_widths)
         n_sel = len(ind_sel)
@@ -646,10 +646,9 @@ class MakeMask:
         Returns
         -------
         coords : ndarray(float)
-            The coordinates of particles in the ICs, in the same units  as the
-            box size (typically Mpc / h). The coordinates are shifted (and
-            wrapped) such that the centre of the high-res region is at the
-            origin.
+            The coordinates of particles in the ICs [Mpc]. They are shifted
+            (and wrapped) such that the centre of the high-res region is at
+            the origin.
         """
         print(f"[Rank {comm_rank}] Computing initial positions of dark matter "
               "particles...")
@@ -902,8 +901,8 @@ class MakeMask:
                     )
                     ax.add_patch(rect)
 
-            ax.set_xlabel(f"${axis_labels[xx]}$ [$h^{{-1}}$ Mpc]")
-            ax.set_ylabel(f"${axis_labels[yy]}$ [$h^{{-1}}$ Mpc]")
+            ax.set_xlabel(f"${axis_labels[xx]}$ [Mpc]")
+            ax.set_ylabel(f"${axis_labels[yy]}$ [Mpc]")
 
             # Plot target high-resolution sphere (if that is our shape).
             if self.params['shape'] == 'sphere':
