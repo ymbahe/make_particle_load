@@ -561,13 +561,10 @@ class MakeMask:
         shape = self.params['shape']
 
         # First step: set up particle reader and load metadata.
-        # This is different for SWIFT and GADGET simulations, but subsequent
-        # loading
-        if self.params['data_type'].lower() == 'gadget':
+        # Currently, only SWIFT input is supported, may add others later...
+        if self.params['data_type'].lower() != 'swift':
             raise ValueError(
-                "Processing of Gadget parent simulations is no longer "
-                "supported."
-            )
+                f"Only SWIFT input supported, not {self.params['data_type']}.")
 
         elif self.params['data_type'].lower() == 'swift':
             snap = read_swift(self.params['snap_file'], comm=comm)
@@ -631,29 +628,7 @@ class MakeMask:
 
         print(f'[Rank {comm_rank}] Loaded {len(ids)} dark matter particles')
 
-        # If the snapshot is from a user-friendly SWIFT simulation, all
-        # lengths are in 'h-free' coordinates. Unfortunately, the ICs still
-        # assume 'h^-1' units, so for consistency we now have to multiply
-        # h factor back in...
-        if self.params['data_type'].lower() == 'swift':
-            self.convert_lengths_to_inverse_h()
-
         return ids
-
-    def convert_lengths_to_inverse_h(self):
-        """Convert length parameters into 'h^-1' units for IC-GEN."""
-        h = self.params['h_factor']
-        keys = self.params.keys()
-        if 'radius' in keys:
-            self.params['radius'] *= h
-        if 'dim' in keys:
-            self.params['dim'] *= h
-        if 'centre' in keys:
-            self.params['centre'] *= h
-        if 'box_size' in keys:
-            self.params['box_size'] *= h
-        if 'mask_cell_size' in keys:
-            self.params['mask_cell_size'] *= h
 
     def compute_ic_positions(self, ids) -> np.ndarray:
         """
@@ -987,14 +962,14 @@ class MakeMask:
             )
             ds.attrs.create('Description',
                             "Coordinates of the centres of selected mask "
-                            "cells. The (uniform) cell width is stored as the "
-                            "attribute `grid_cell_width`.")
+                            "cells [Mpc]. The (uniform) cell width is stored "
+                            "as the attribute `grid_cell_width`.")
 
             db = f.create_dataset(
                 'Basic_Coordinates', data=np.array(self.basic_cell_coords))
             db.attrs.create('Description',
                             "Coordinates of the centres of the un-refined "
-                            "mask cells [h^-1 Mpc].")
+                            "mask cells [Mpc].")
 
             # Store attributes directly related to the mask as HDF5 attributes.
             ds.attrs.create('bounding_length', self.mask_extent)

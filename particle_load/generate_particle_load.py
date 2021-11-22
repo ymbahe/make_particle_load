@@ -358,13 +358,17 @@ class ParticleLoad:
         centre : ndarray(float) [3]
             The central point of the mask in the simulation box.
 
+        Note
+        ----
+        All returned quantities are in units of the simulation box length.
+
         """
         stime = time.time()
         mask_file = self.config['mask_file']
 
         if not self.config['is_zoom']:
             print(f"Uniform volume simulation, centre: "
-                  f"{self.sim_box['l_mpchi'] * 0.5:.2f} h^-1 Mpc in x/y/z.")
+                  f"{self.sim_box['l_mpc'] * 0.5:.2f} Mpc in x/y/z.")
             return None, np.array((0.5, 0.5, 0.5))
 
         if comm_rank == 0:
@@ -382,30 +386,29 @@ class ParticleLoad:
             with h5.File(mask_file, 'r') as f:
                 
                 # Centre of the high-res zoom in region
-                lbox_mpchi = f['Coordinates'].attrs.get('box_size')
-                self.sim_box['l_mpchi'] = lbox_mpchi
-                self.sim_box['l_mpc'] = lbox_mpchi / self.cosmo['hubbleParam']
+                lbox_mpc = f['Coordinates'].attrs.get('box_size')
+                self.sim_box['l_mpc'] = lbox_mpc
+                self.sim_box['l_mpchi'] = lbox_mpc * self.cosmo['hubbleParam']
                 self.sim_box['volume_mpchi'] = lbox_mpchi**3
                 self.sim_box['volume_mpc'] = self.sim_box['l_mpc']**3
 
                 centre = np.array(
-                    f['Coordinates'].attrs.get("geo_centre")) / lbox_mpchi
+                    f['Coordinates'].attrs.get("geo_centre")) / lbox_mpc
 
                 # Data specifying the mask for the high-res region
                 mask_data['cell_coordinates'] = np.array(
-                    f['Coordinates'][...], dtype='f8') / lbox_mpchi
+                    f['Coordinates'][...], dtype='f8') / lbox_mpc
                 mask_data['cell_size'] = (
-                    f['Coordinates'].attrs.get("grid_cell_width")) / lbox_mpchi
-                self.sim_box['l_mpchi'] = f['Coordinates'].attrs.get("box_size")
+                    f['Coordinates'].attrs.get("grid_cell_width")) / lbox_mpc
 
                 # Also load the side length of the cube enclosing the mask,
                 # and the volume of the target high-res region (at the
                 # selection redshift).                
                 mask_data['extent'] = (
-                    f['Coordinates'].attrs.get("bounding_length")) / lbox_mpchi
+                    f['Coordinates'].attrs.get("bounding_length")) / lbox_mpc
                 mask_data['high_res_volume'] = (
                     f['Coordinates'].attrs.get("high_res_volume")
-                    / lbox_mpchi**3)
+                    / lbox_mpc**3)
 
         else:
             mask_data = None
@@ -421,11 +424,11 @@ class ParticleLoad:
                   f"({time.time() - stime:.2e} sec.)")
             print(f"  Target centre: "
                   f"{centre[0]:.2f} / {centre[1]:.2f} / {centre[2]:.2f}; "
-                  f"({centre_mpchi[0]:.2f} / {centre_mpchi[1]:.2f} / "
-                  f"{centre_mpchi[2]:.2f}) h^-1 Mpc")
+                  f"({centre_mpc[0]:.2f} / {centre_mpc[1]:.2f} / "
+                  f"{centre_mpc[2]:.2f}) Mpc")
             print(f"  Bounding side: {mask_data['extent']:.3f} x box length\n"
                   f"  Number of cells: {num_mask_cells} (cell size: "
-                  f"{mask_data['cell_size'] * lbox_mpchi:.2f} h^-1 Mpc)\n"
+                  f"{mask_data['cell_size'] * lbox_mpc:.2f} Mpc)\n"
             )
 
         return mask_data, centre
