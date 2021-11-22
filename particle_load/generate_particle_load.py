@@ -28,6 +28,8 @@ comm = MPI.COMM_WORLD
 comm_rank = comm.Get_rank()
 comm_size = comm.Get_size()
 
+rng = np.random.default_rng()
+
 # ** TO DO **
 # - Change internal units from h^-1 Mpc to Mpc, *only* add h^-1 for IC-Gen.
 # - Tidy up output
@@ -145,6 +147,7 @@ class ParticleLoad:
             'mask_file': None,
             'uniform_particle_number': None,
             'target_mass': None,
+            'identify_gas': False,
 
             # In-/output options
             'output_formats': "Fortran, HDF5",
@@ -164,6 +167,8 @@ class ParticleLoad:
             'zone3_min_n_cells': 20,
             'zone3_max_n_cells': 1000,
             'min_gcell_load': 8,
+            'dm_to_gas_number_ratio': None,
+            'dm_to_gas_mass_ratio': None,
         }
 
         cparams = {}
@@ -958,7 +963,6 @@ class ParticleLoad:
         ns_ideal = np.log10(1 / gcube_length) / np.log10(factors)
         ns = (np.floor(ns_ideal)).astype(int) + delta_ns
     
-        #set_trace()
         # Volume enclosed by next-to-outermost shell
         v_inner = (gcube_length * factors**(ns-1))**3
 
@@ -1108,6 +1112,7 @@ class ParticleLoad:
         gcell_info = {
             'num_parts_per_cell': np.zeros(num_gcell_types, dtype=int) - 1,
             'particle_masses': np.zeros(num_gcell_types) - 1,
+            'total_masses': np.zeros(num_gcell_types) - 1,
             'num_cells': np.zeros(num_gcell_types, dtype=int) - 1,
             'num_types': num_gcell_types
         }
@@ -1363,9 +1368,15 @@ class ParticleLoad:
             else:
                 kernel = make_uniform_grid(num=gcell_load_type, centre=True)    
 
+            if not self.config['identify_gas'] or itype > 0:
+                kernel_masses = np.zeros(gcell_load_type) + particle_mass_type
+            else:
+                # We assign gas particles right here
+                kernel_masses, mass_ptypes = self.identify_gas(gcell_load_type)
+
             cy.fill_gcells_with_particles(
                 gcells['pos'][ind_type, :], kernel, parts['pos'],
-                parts['m'], particle_mass_type, num_parts_created
+                parts['m'], kernel_masses, num_parts_created
             )
             np_type = ncell_type * gcell_load_type
             num_parts_created += np_type
@@ -1435,6 +1446,72 @@ class ParticleLoad:
             glass[num_parts] = load_glass_from_file(num_parts, glass_dir)
 
         return glass
+
+    def identify_gas(self, num_tot):
+        """
+        Identify gas and DM particles within a gcell kernel.
+
+        Parameters
+        ----------
+        num_tot : int
+            The total number of particles in the kernel.
+
+        Returns
+        -------
+        masses : ndarray(float)
+            The masses (in units of the total box mass) of each particle in
+            the kernel.
+        mass_ptypes : (float, float)
+            The masses for gas and DM particles, respectively.
+
+        """
+        # Find total mass in DM and baryons in a gcell
+        f_m_baryon = self.cosmo['OmegaBaryon'] / self.cosmo['Omega0']
+        f_m_dm = 1.0 - f_m_baryon
+        m_gcell_tot = self.gcube['cell_size']**3
+        m_gcell_gas = m_gcell_tot * f_m_baryon
+        m_gcell_dm = m_gcell_tot * f_m_dm
+
+        # Calculate gas and DM particle numbers, depending on setting
+        dm_n_factor = self.config['dm_to_gas_number_ratio']
+        if dm_n_factor is not None:
+            n_frac_dm = dm_n_factor / (1 + dm_n_factor)
+            num_dm = int(np.rint(num_tot * n_frac_dm))
+        elif self.config['dm_to_gas_mass_ratio'] is not None:
+            fp_gas = 1. / self.config['dm_to_gas_mass_ratio']
+
+            # From combining N = N_gas + N_DM and M_i = N_i * m_i
+            num_dm = int(np.rint((m_gcell_dm * num_tot * fp_gas) /
+                                 (m_gcell_gas + m_gcell_dm * fp_gas)))
+        else:
+            raise ValueError(
+                "To identify gas particles in the particle load, you need to "
+                "specify either the number of mass fractions!"
+            )
+
+        m_dm = m_gcell_dm / num_dm
+        m_gas = m_gcell_gas / (num_tot - num_dm)
+
+        if comm_rank == 0:
+            m_to_msun = self.sim_box['mass_msun']
+            print(
+                f"Zone I: m_dm =  {m_dm:.2e} ({m_dm * m_to_msun:.2e} M_Sun), "
+                f"m_gas = {m_gas:.2e} ({m_gas * m_to_msun:.2e} M_Sun).\n"
+                f"        N_DM / N_gas = {num_dm / (num_tot - num_dm):.2f}."
+            )
+
+        # Assign particles in the kernel to each group
+        ind_dm = np.random.choice(num_tot, size=num_dm, replace=False)
+        ptypes = np.zeros(num_tot, dtype=int)
+        ptypes[ind_dm] = 1
+        ind_gas = np.nonzero(ptypes == 0)[0]
+
+        kernel_masses = np.zeros(num_tot)
+        kernel_masses[ind_dm] = m_dm
+        kernel_masses[ind_gas] = m_gas
+
+        return kernel_masses, (m_dm, m_gas)
+
 
     def _verify_gcube_region(self, parts, nparts_created, gvolume):
         """

@@ -80,7 +80,7 @@ def fill_gcells_with_particles(
     ndarray[float64_t, ndim=2] coords_kernel,
     ndarray[float64_t, ndim=2] coords_parts,
     ndarray[float64_t, ndim=1] mass_parts,
-    float mass,
+    ndarray[float64_t, ndim=1] mass_kernel,
     long particle_offset
     ):
     """
@@ -99,8 +99,8 @@ def fill_gcells_with_particles(
     mass_parts : ndarray(float) [N_cells]
         The masses of all gcells, including those not processed now.
         This array is only used for output.
-    mass : float
-        The mass to assign to each particle.
+    mass_kernel : float [N_in_kernel]
+        The mass to assign to each particle in the kernel.
     part_offset : long
         The index of the first particle to generate here, in the full array.
 
@@ -120,13 +120,14 @@ def fill_gcells_with_particles(
     >>> kernel = np.array([[-0.1, -0.1, 0.], [0.2, 0., -0.2]])
     >>> coords = np.zeros((3, 3)) - 10
     >>> masses = np.zeros(3) - 10
-    >>> _fill_gcells_with_particles(centres, kernel, coords, masses, 0.5, 1)
+    >>> m_kernel = np.array((1.0, 0.5))
+    >>> fill_gcells_with_particles(centres, kernel, coords, m_kernel, 1)
     >>> print(coords)
     array([[-10., -10., -10.],
            [-1.1, 2.4, 0.4],
            [-0.8, 2.5, 0.2]])
     >>> print(masses)
-    array([-10., 0.5, 0.5])
+    array([-10., 1.0, 0.5])
 
     """
     cdef long n_gcells = gcell_centres.shape[0]
@@ -141,7 +142,7 @@ def fill_gcells_with_particles(
             for kk in range(3):
                 coords_parts[ind, kk] = (gcell_centres[ii, kk] +
                                  coords_kernel[jj, kk])
-                mass_parts[ind] = mass
+            mass_parts[ind] = mass_kernel[jj]
             count += 1
 
 
