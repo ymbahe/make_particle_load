@@ -1387,7 +1387,7 @@ class ParticleLoad:
             if not self.config['identify_gas'] or itype > 0:
                 kernel_masses = np.zeros(gcell_load_type) + particle_mass_type
                 if itype == 0:
-                    self.gcell_info['zone1_m_dm'] = particle_mass_type
+                    self.gcell_info['zone1_m_dm'] = -1
                     self.gcell_info['zone1_m_gas'] = -1
                     self.gcell_info['zone1_gas_mips_mpc'] = -1
             else:
@@ -2001,6 +2001,9 @@ class ParticleLoad:
                 'DMO_ParticleMasses_MSun',
                 data=self.gcell_info['particle_masses'][0:1] * m_to_msun)
             ds.attrs.create('Description', descr_m_msun)
+
+            if not self.config['is_zoom']:
+                return
 
             g = f.create_group('ZoneII')
             ds = g.create_dataset(
