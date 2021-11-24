@@ -71,11 +71,16 @@ class ParticleLoad:
 
         self.verbose = 1
 
+        print("----------------------------")
+        print("  PARTICLE LOAD GENERATOR   ")
+        print("----------------------------")
+
         # Read and process the parameter file.
         self.read_param_file(param_file)
         self.sim_box = self.initialize_sim_box()
         self.mask_data, self.centre = self.load_mask_file()
 
+        print("Computing simulation and (target) particle masses...")
         self.compute_box_mass()
         self.get_target_resolution()
 
@@ -286,7 +291,8 @@ class ParticleLoad:
 
         # Send masses to all MPI ranks and store as class attributes
         self.sim_box['mass_msun'] = comm.bcast(m_tot)
-        if self.verbose:
+        if self.verbose and comm_rank == 0:
+            print(f"Critical density is {rho_crit:.4e} M_Sun / Mpc^3")
             print(f"Total box mass is {self.sim_box['mass_msun']:.2e} M_Sun")
 
     def get_target_resolution(self):
@@ -365,6 +371,9 @@ class ParticleLoad:
         stime = time.time()
         mask_file = self.config['mask_file']
 
+        if comm_rank == 0:
+            print(f"Reading mask file '{mask_file}'...", end='')
+
         if not self.config['is_zoom']:
             print(f"Uniform volume simulation, centre: "
                   f"{self.sim_box['l_mpc'] * 0.5:.2f} Mpc in x/y/z.")
@@ -418,14 +427,14 @@ class ParticleLoad:
         if comm_rank == 0:
             centre_mpc = centre * lbox_mpc 
             num_mask_cells = mask_data['cell_coordinates'].shape[0]
-            print(f"Finished loading data from mask file "
-                  f"({time.time() - stime:.2e} sec.)")
+            print(f" done ({time.time() - stime:.2e} sec.)")
+            print(f"  Simulation box size: {self.sim_box['l_mpc']:.3f} Mpc.")
             print(f"  Target centre: "
                   f"{centre[0]:.2f} / {centre[1]:.2f} / {centre[2]:.2f}; "
                   f"({centre_mpc[0]:.2f} / {centre_mpc[1]:.2f} / "
                   f"{centre_mpc[2]:.2f}) Mpc")
             print(f"  Bounding side: {mask_data['extent']:.3f} x box length\n"
-                  f"  Number of cells: {num_mask_cells} (cell size: "
+                  f"  Number of mask cells: {num_mask_cells} (cell size: "
                   f"{mask_data['cell_size'] * lbox_mpc:.2f} Mpc)\n"
             )
 
@@ -465,9 +474,9 @@ class ParticleLoad:
 
         """
         if comm_rank == 0:
-            print('\n-------------------------')
+            print('\n---------------------------')
             print('Generating particle load...')
-            print('-------------------------\n')
+            print('---------------------------\n')
 
         # --------------------------------------------------------------------
         # --- Act I: Preparation (find structure and number of particles) ---
@@ -1244,7 +1253,7 @@ class ParticleLoad:
                     f"   {neq:,} ({neq**(1/3):.2f}^3) particles in the gcube,\n"
                     f"   {nbox:.2e} ({nbox**(1/3):.2f}^3) particles in the "
                     f"entire simulation box, and \n"
-                    f"   {neq / gcube['volume']:,.3f} particles per (cMpc/h)^3."
+                    f"   {neq / gcube['volume_mpc']:,.3f} particles cMpc^-3."
                 )       
 
         print(f"Lowest gcell load is {lowest_gcell_load}.")
@@ -1379,12 +1388,20 @@ class ParticleLoad:
                 kernel_masses = np.zeros(gcell_load_type) + particle_mass_type
                 if itype == 0:
                     self.gcell_info['zone1_m_dm'] = particle_mass_type
-                    self.gcell_info['zone1_m_gas'] = None
+                    self.gcell_info['zone1_m_gas'] = -1
+                    self.gcell_info['zone1_gas_mips_mpc'] = -1
             else:
                 # We assign gas particles right here
                 kernel_masses, mass_ptypes = self.identify_gas(gcell_load_type)
                 self.gcell_info['zone1_m_dm'] = mass_ptypes['dm']
                 self.gcell_info['zone1_m_gas'] = mass_ptypes['gas']
+
+                # Mean gas inter-particle separation (for metadata file)
+                num_gas = np.count_nonzero(kernel_masses == mass_ptypes['gas'])
+                self.gcell_info['zone1_gas_mips_mpc'] = (
+                    self.gcube['cell_size'] * self.sim_box['l_mpc'] /
+                    np.cbrt(num_gas)
+                )
 
             cy.fill_gcells_with_particles(
                 gcells['pos'][ind_type, :], kernel, parts['pos'],
@@ -1502,15 +1519,17 @@ class ParticleLoad:
                 "specify either the number of mass fractions!"
             )
 
+        num_gas = num_tot - num_dm
         m_dm = m_gcell_dm / num_dm
-        m_gas = m_gcell_gas / (num_tot - num_dm)
+        m_gas = m_gcell_gas / num_gas
 
         if comm_rank == 0:
             m_to_msun = self.sim_box['mass_msun']
             print(
-                f"Zone I: m_dm =  {m_dm:.2e} ({m_dm * m_to_msun:.2e} M_Sun), "
-                f"m_gas = {m_gas:.2e} ({m_gas * m_to_msun:.2e} M_Sun).\n"
-                f"        N_DM / N_gas = {num_dm / (num_tot - num_dm):.2f}."
+                f"Zone I: m_dm =  {m_dm:.5e} ({m_dm * m_to_msun:.5e} M_Sun),\n"
+                f"        m_gas = {m_gas:.5e} ({m_gas * m_to_msun:.5e} M_Sun)"
+                f"\n        N_DM = {num_dm}, N_gas = {num_gas}, "
+                f"N_DM / N_gas = {num_dm / num_gas:.2f}."
             )
 
         # Assign particles in the kernel to each group
@@ -1967,20 +1986,21 @@ class ParticleLoad:
             g.attrs.create('N_Part_Equiv', self.sim_box['n_part_equiv'])
 
             g = f.create_group('ZoneI')
+            g.attrs['m_gas'] = self.gcell_info['zone1_m_gas']
+            g.attrs['m_gas_msun'] = self.gcell_info['zone1_m_gas'] * m_to_msun
+            g.attrs['m_dm'] = self.gcell_info['zone1_m_dm']
+            g.attrs['m_dm_msun'] = self.gcell_info['zone1_m_dm'] * m_to_msun
+            g.attrs['MeanInterParticleSeparation_gas_Mpc'] = (
+                self.gcell_info['zone1_gas_mips_mpc'])
             ds = g.create_dataset(
                 'DMO_ParticleMasses',
                 data=self.gcell_info['particle_masses'][0:1])
             ds.attrs.create('Description', descr_m)
-            ds.attrs.create('m_dm', self.gcell_info['zone1_m_dm'])
-            ds.attrs.create('m_gas', self.gcell_info['zone1_m_gas'])
 
             ds = g.create_dataset(
                 'DMO_ParticleMasses_MSun',
                 data=self.gcell_info['particle_masses'][0:1] * m_to_msun)
             ds.attrs.create('Description', descr_m_msun)
-            ds.attrs.create('m_dm', self.gcell_info['zone1_m_dm'] * m_to_msun)
-            ds.attrs.create(
-                'm_gas', self.gcell_info['zone1_m_gas'] * m_to_msun)
 
             g = f.create_group('ZoneII')
             ds = g.create_dataset(
