@@ -269,8 +269,8 @@ class ParticleLoad:
         sim_box = {}
         # For zooms, we will load the box size from the mask file in a moment.
         if not self.config['is_zoom']:
-            sim_box['l_mpchi'] = self.config['box_size']
-            sim_box['l_mpc'] = self.config['box_size'] / h
+            sim_box['l_mpc'] = self.config['box_size']
+            sim_box['l_mpchi'] = self.config['box_size'] * h
             sim_box['volume_mpc'] = sim_box['l_mpc']**3
 
         return sim_box
