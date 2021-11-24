@@ -1354,7 +1354,7 @@ class ParticleLoad:
         zone2_type = self.config['zone2_type']
 
         if comm_rank == 0:
-            np_all = self.nparts['zone1_all'] + self.nparts['zone1_all']
+            np_all = self.nparts['zone1_all'] + self.nparts['zone2_all']
             print(f"\n---- Generating {np_all:,} gcube particles "
                   f"(Zone I/II) ----\n")
 
