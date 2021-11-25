@@ -38,7 +38,13 @@ class SwiftICs:
         with h5.File(in_file, 'r') as f:
             g = f['Header']
             for key in g.attrs.keys():
-                header[key] = g.attrs[key]
+                if key in ['BoxSize', 'Flag_Entropy_ICs', 'MassTable',
+                           'NumFilesPerSnapshot', 'NumPart_Total',
+                           'NumPart_Total_HighWord','Time', 'HubbleParam']:
+                    header[key] = g.attrs[key]
+
+        header['BoxSize'] /= header['HubbleParam']
+
         return header
 
     def load_parts(self, in_file, num_files, ptype):
@@ -69,6 +75,11 @@ class SwiftICs:
                         parts[prop] = np.zeros(dims, dtype=g[prop].dtype)-1
                     g[prop].read_direct(parts[prop], None, out_loc)
 
+        if self.header['MassTable'][ptype] > 0:
+            parts['Masses'] = (
+                np.zeros(self.num_parts[ptype], dtype="float32")
+                + self.header['MassTable'][ptype]
+            )
         if 'Masses' in parts:
             parts['Masses'] /= self.header['HubbleParam']
         if 'Coordinates' in parts:
@@ -133,6 +144,10 @@ class SwiftICs:
         with h5.File(out_file, 'w') as f:
 
             # Header. MUST CHECK WHETHER NAMES MUST BE CHANGED!
+            self.header['NumFilesPerSnapshot'] = 1
+            self.header['NumPart_ThisFile'] = self.num_parts
+            self.header['NumPart_Total'] = self.num_parts
+
             h = f.create_group('Header')
             for key in self.header:
                 h.attrs[key] = self.header[key]
