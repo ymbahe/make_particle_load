@@ -99,7 +99,7 @@ def make_param_file_for_icgen(params):
 def make_submit_file_for_swift(params):
     """Make a SLURM submission script file for SWIFT."""
 
-    run_dir = f"{params['swift_dir']}/{params['f_name']}"
+    run_dir = f"{params['swift_run_dir']}/{params['f_name']}"
     create_dir_if_needed(run_dir)
 
     submit_template = f"./templates/swift/{params['sim_type'].lower()}/submit"
@@ -124,7 +124,7 @@ def make_param_file_for_swift(params):
     sim_type = params['sim_type'].lower()
 
     # Make the run and output directories
-    run_dir = f"{params['swift_dir']}/{params['f_name']}"
+    run_dir = f"{params['swift_run_dir']}/{params['f_name']}"
     create_dir_if_needed(run_dir + '/out_files')
 
     # Replace values.

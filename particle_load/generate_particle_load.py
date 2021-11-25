@@ -92,8 +92,8 @@ class ParticleLoad:
         # Generate param and submit files, if desired (NOT YET IMPLEMENTED).
         if comm_rank == 0:
             self.create_param_and_submit_files(
-                create_param=create_param_files,
-                create_submit=create_submit_files
+                create_param=self.extra_params['generate_param_files'],
+                create_submit=self.extra_params['generate_submit_files']
             )
 
         # Save particle load
@@ -239,7 +239,7 @@ class ParticleLoad:
             'background_eps_to_mips_ratio': 0.02,
             
             # SWIFT specific options
-            'swift_dir': None,
+            'swift_run_dir': None,
             'swift_num_nodes': 1,
             'swift_runtime_hours': 72,
             'swift_ics_dir': '.',
@@ -2394,7 +2394,7 @@ class ParticleLoad:
         param_dict['sim_type'] = extra_params['sim_type']
 
         # SWIFT-specific parameters
-        param_dict['swift_dir'] = extra_params['swift_dir']
+        param_dict['swift_run_dir'] = extra_params['swift_run_dir']
         param_dict['swift_ics_dir'] = extra_params['swift_ics_dir']
         param_dict['swift_num_nodes'] = extra_params['swift_num_nodes']
         param_dict['swift_runtime_hours'] = extra_params['swift_runtime_hours']
