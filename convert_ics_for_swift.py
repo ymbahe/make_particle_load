@@ -64,7 +64,7 @@ class SwiftICs:
                     print(f"No particles of type {ptype} on file {ifile}...")
                     continue
     
-                out_loc = np.s_[offset : offset+num_this_file]
+                out_loc = np.s_[offset : offset+num_this_file, ...]
                 print(f"Filling particles {offset} : {offset+num_this_file}")
                 offset += num_this_file
                 g = f[f'PartType{ptype}']
