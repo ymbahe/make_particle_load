@@ -26,7 +26,7 @@ Scheduler:
 
 # Parameters governing the snapshots
 Snapshots:
-  basename:            $f_name
+  basename:            $sim_name
   delta_time:          1.02
   scale_factor_first:  0.02
   output_list_on:      1
@@ -68,7 +68,7 @@ Gravity:
 
 # Parameters related to the initial conditions
 InitialConditions:
-  file_name:                   $swift_ics_dir/$f_name.hdf5
+  file_name:                   $swift_ics_dir/$sim_name.hdf5
   periodic:                    1
   cleanup_h_factors:           1    
   cleanup_velocity_factors:    1  

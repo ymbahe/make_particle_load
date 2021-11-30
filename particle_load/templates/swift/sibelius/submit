@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #SBATCH --ntasks=$swift_num_nodes
-#SBATCH -J $f_name
+#SBATCH -J $sim_name
 #SBATCH -o ./out_files/%x.%J.swift.out
 #SBATCH -e ./out_files/%x.%J.swift.err
 #SBATCH -p cosma7

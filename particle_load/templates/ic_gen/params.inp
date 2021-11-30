@@ -6,7 +6,7 @@
 # Note however lines beginning with a '%' are ignored. ARJ 16/08/2016
 ------------------------------------------------------------------------------
 ---------**********  Put text description of ICs below in quotes ********* ---
-'$f_name'
+'$sim_name'
 ------------------------------------------------------------------------------
 # The three parameters below define the type of output
 ------------------------------------------------------------------------------
@@ -42,10 +42,10 @@ $icgen_2lpt_type                       ! 2lpt ICS:  0-No 1-Yes (Cosm)  2-Yes (Re
 0                              ! Write out Lagrangian positions 1-Yes,0-No
 0                              ! For Resim ics only:  1: output linear density; 0 nothing
 --------------------------------------------------------------------------------------------
-0                            ! 0 - Import file : -1 -  cosm glass file:  > 0 the 1-d cubic grid size
-'./ic_gen_submit_files/$f_name/particle_load/fbinary/PL'  ! (Imported) Part load basename
+0                             ! 0 - Import file : -1 -  cosm glass file:  > 0 the 1-d cubic grid size
+'./particle_load/fbinary/PL'  ! (Imported) Part load basename
 1                             !             ! Part load Rep factor
-'./ic_gen_submit_files/$f_name/ICs/$f_name'  !output file base name
+'./ICs/$sim_name'             ! output file base name
 ------------------------------------------------------------------------------
 '$icgen_linear_powspec_file'  ! Input Power spectrum to use
 ------------------------------------------------------------------------------

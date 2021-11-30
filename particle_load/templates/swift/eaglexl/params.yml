@@ -1,6 +1,6 @@
 # Define some meta-data about the simulation
 MetaData:
-  run_name:   $f_name
+  run_name:   $sim_name
 
 # Define the system of units to use internally. 
 InternalUnitSystem:
@@ -26,7 +26,7 @@ TimeIntegration:
   
 # Parameters governing the snapshots
 Snapshots:
-  basename:            $f_name
+  basename:            $sim_name
   delta_time:          1.02
   scale_factor_first:  0.02
   output_list_on:      1
@@ -99,7 +99,7 @@ Restarts:
 
 # Parameters related to the initial conditions
 InitialConditions:
-  file_name:  $swift_ics_dir/$f_name.hdf5
+  file_name:  $swift_ics_dir/$sim_name.hdf5
   periodic:   1
   cleanup_h_factors: 1               # Remove the h-factors inherited from Gadget
   cleanup_velocity_factors: 1        # Remove the sqrt(a) factor in the velocities inherited from Gadget

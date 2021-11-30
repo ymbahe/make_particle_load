@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #SBATCH --ntasks=$swift_num_nodes
-#SBATCH -J $f_name
+#SBATCH -J $sim_name
 #SBATCH -o ./out_files/%x.%J.swift.out
 #SBATCH -e ./out_files/%x.%J.swift.err
 #SBATCH -p cosma7
@@ -19,7 +19,9 @@ module load parallel_hdf5/1.10.6
 module load fftw/3.3.8cosma7
 module load gsl/2.5
 
-mpirun -np $$SLURM_NTASKS $swift_exec -v 1 --pin --cosmology --self-gravity --threads=$$SLURM_CPUS_PER_TASK --restart params.yml
+mpirun -np $$SLURM_NTASKS $swift_exec \
+	-v 1 --pin --cosmology --self-gravity \
+	--threads=$$SLURM_CPUS_PER_TASK --restart params.yml
 
 echo "Job done, info follows..."
 sacct -j $$SLURM_JOBID --format=JobID,JobName,Partition,AveRSS,MaxRSS,AveVMSize,MaxVMSize,Elapsed,ExitCode
