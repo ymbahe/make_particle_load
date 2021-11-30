@@ -217,7 +217,7 @@ class ParticleLoad:
             'z_initial': 127.0,
             'z_final': 0.0,
             'sim_type': 'dmo',
-            'dm_only_sim': True,
+            'dm_only_run': True,
 
             # IC-Gen specific parameters
             'num_species': 2,
@@ -248,7 +248,7 @@ class ParticleLoad:
             'swift_run_dir': None,
             'swift_num_nodes': 1,
             'swift_runtime_hours': 72,
-            'swift_ics_dir': '.',
+            'swift_ics_dir': '../ICs',
             'swift_exec': '../swiftsim/examples/swift',
             'swift_num_nodes': 1,
             'swift_runtime_hours': 72,
@@ -276,7 +276,6 @@ class ParticleLoad:
         # For zooms, we will load the box size from the mask file in a moment.
         if not self.config['is_zoom']:
             sim_box['l_mpc'] = self.config['box_size']
-            sim_box['l_mpchi'] = self.config['box_size'] * h
             sim_box['volume_mpc'] = sim_box['l_mpc']**3
 
         return sim_box
@@ -402,7 +401,6 @@ class ParticleLoad:
                 # Centre of the high-res zoom in region
                 lbox_mpc = f['Coordinates'].attrs.get('box_size')
                 self.sim_box['l_mpc'] = lbox_mpc
-                self.sim_box['l_mpchi'] = lbox_mpc * self.cosmo['hubbleParam']
                 self.sim_box['volume_mpc'] = self.sim_box['l_mpc']**3
 
                 centre = np.array(
@@ -571,7 +569,6 @@ class ParticleLoad:
             )
 
         # Side length of one gcell
-        gcube['cell_size_mpchi'] = self.sim_box['l_mpchi'] / n_base
         gcube['cell_size_mpc'] = self.sim_box['l_mpc'] / n_base
         gcube['cell_size'] = 1. / n_base   # In sim box size units
 
@@ -2081,8 +2078,8 @@ class ParticleLoad:
         fft = self.compute_fft_highres_grid()
         print(
             f"--- HRgrid:\n   c={self.centre}, "
-            f"L_box={self.sim_box['l_mpchi']:.2f} Mpc/h\n"
-            f"L_grid={fft['l_mesh_mpchi']:.2f} Mpc/h, "
+            f"L_box={self.sim_box['l_mpc']:.2f} Mpc\n"
+            f"L_grid={fft['l_mesh_mpc']:.2f} Mpc, "
             f"n_eff={fft['n_eff']:.2f} (x2 = {fft['n_eff']*2:.2f})\n"
             f"FFT buffer fraction="
             f"{self.extra_params['icgen_fft_to_gcube_ratio']:.2f}"
@@ -2115,14 +2112,14 @@ class ParticleLoad:
             fft_params = {
                 'num_eff': num_part_box,
                 'n_eff': int(np.rint(np.cbrt(num_part_box))),
-                'l_mesh_mpchi': self.sim_box['l_mpchi']
+                'l_mesh_mpc': self.sim_box['l_mpc']
             }
             return fft_params
 
         # Rest is only for "standard" (cubic) zooms        
         l_mesh = (self.extra_params['icgen_fft_to_gcube_ratio'] *
                   self.gcube['sidelength'])
-        l_mesh_mpchi = l_mesh * self.sim_box['l_mpchi']
+        l_mesh_mpc = l_mesh * self.sim_box['l_mpc']
         if l_mesh > 1.:
             raise ValueError(
                 f"Buffered zoom region is too big ({l_mesh:.3e})!")
@@ -2147,15 +2144,15 @@ class ParticleLoad:
             print(f"Loop n_levels: {n_levels}")
 
             actual_l_mesh = 1. / (2.**n_levels)
-            actual_l_mesh_mpchi = self.sim_box['l_mpchi'] / (2.**n_levels)
-            if (actual_l_mesh_mpchi < l_mesh_mpchi):
+            actual_l_mesh_mpc = self.sim_box['l_mpc'] / (2.**n_levels)
+            if (actual_l_mesh_mpc < l_mesh_mpc):
                 raise Exception("Multi-grid l_mesh is too small!")
 
             actual_num_eff = int(num_part_box * actual_l_mesh**3)
             
             print(
                 f"--- HRgrid num multigrids={n_levels}, "
-                f"lowest = {actual_l_mesh_mpchi:.2f} Mpc/h, "
+                f"lowest = {actual_l_mesh_mpc:.2f} Mpc, "
                 f"n_eff = {actual_num_eff**(1/3):.2f}^3 "
                 f"(x2: {2*actual_num_eff**(1/3):.2f}^3)"
             )
@@ -2163,7 +2160,7 @@ class ParticleLoad:
         fft_highres_grid_params = {
                 'num_eff': num_eff,
                 'n_eff': int(np.rint(np.cbrt(num_eff))), # Exact up to precision
-                'l_mesh_mpchi': l_mesh,
+                'l_mesh_mpc': l_mesh_mpc,
         }
         return fft_highres_grid_params
 
@@ -2266,7 +2263,7 @@ class ParticleLoad:
 
     def compute_softenings(self, verbose=False) -> dict:
         """
-        Compute softening lengths, in units of Mpc/h.
+        Compute softening lengths, in units of Mpc.
 
         This is not required for the actual particle load generation, only
         to make the simulation parameter files.
@@ -2282,38 +2279,42 @@ class ParticleLoad:
         comoving_ratio = self.extra_params['comoving_eps_ratio']
         proper_ratio = self.extra_params['proper_eps_ratio']
 
-        # Compute mean inter-particle separation (ips), in h^-1 Mpc.
-        mean_ips = self.sim_box['l_mpchi'] / self.sim_box['n_part_equiv']
+        # Compute mean inter-particle separation (ips), in Mpc.
+        mean_ips_mpc = self.sim_box['l_mpc'] / self.sim_box['n_part_equiv']
 
         # Softening lengths for DM
-        eps_dm = mean_ips * comoving_ratio
-        eps_dm_proper = mean_ips * proper_ratio
+        eps_dm_mpc = mean_ips_mpc * comoving_ratio
+        eps_dm_proper_mpc = mean_ips_mpc * proper_ratio
 
         # Softening lengths for baryons
-        if self.extra_params["dm_only_sim"]:
-            eps_baryon = 0.0
-            eps_baryon_proper = 0.0
+        if self.extra_params["dm_only_run"]:
+            eps_baryon_mpc = 0.0
+            eps_baryon_proper_mpc = 0.0
         else:
             # Adjust DM softening lengths according to baryon fraction
             fac = (self.cosmo['OmegaBaryon'] / self.cosmo['OmegaDM'])**(1/3)
-            eps_baryon = eps_dm * fac
-            eps_baryon_proper = eps_dm_proper * fac
+            eps_baryon_mpc = eps_dm_mpc * fac
+            eps_baryon_proper_mpc = eps_dm_proper_mpc * fac
 
         if comm_rank == 0 and verbose:
             print(f"Computed softening lengths:")
             h = self.cosmo['hubbleParam']
-            if not self.extra_params["dm_only_sim"]:
-                print(f"   Comoving softenings: DM={eps_dm:.6f}, "
-                      f"baryons={eps_baryon:.6f} Mpc/h")
-                print(f"   Max proper softenings: DM={eps_dm_proper:.6f}, "
-                      f"baryons={eps_baryon_proper:.6f} Mpc/h")
-            print(f"   Comoving softenings: DM={eps_dm / h:.6f} Mpc, "
-                  f"baryond={eps_baryon / h:.6f} Mpc")
-            print(f"   Max proper softenings: DM={eps_dm_proper / h:.6f} Mpc, "
-                  f"baryons={eps_baryon_proper / h:.6f} Mpc\n")
+            if not self.extra_params["dm_only_run"]:
+                print(f"   Comoving softenings: DM={eps_dm_mpc:.6f}, "
+                      f"baryons={eps_baryon_mpc:.6f} Mpc")
+                print(f"   Max proper softenings: DM={eps_dm_proper_mpc:.6f}, "
+                      f"baryons={eps_baryon_proper_mpc:.6f} Mpc")
+            print(f"   Comoving softenings: DM={eps_dm_mpc:.6f} Mpc, "
+                  f"baryons={eps_baryon_mpc:.6f} Mpc")
+            print(f"   Max proper softenings: DM={eps_dm_proper_mpc:.6f} Mpc, "
+                  f"baryons={eps_baryon_proper_mpc:.6f} Mpc\n")
 
-        eps = {'dm': eps_dm, 'baryons': eps_baryon,
-               'dm_proper': eps_dm_proper, 'baryons_proper': eps_baryon_proper}
+        eps = {
+            'dm': eps_dm_mpc,
+            'baryons': eps_baryon_mpc,
+            'dm_proper': eps_dm_proper_mpc,
+            'baryons_proper': eps_baryon_proper_mpc
+        }
         return eps
 
     def compile_param_dict(self, fft_params, eps, n_cores_icgen):
@@ -2343,10 +2344,11 @@ class ParticleLoad:
             if num_species > 3:
                 print(f"NumSpecies > 3 not supported, ignoring extra.")
 
-        centre_mpchi = self.centre * self.sim_box['l_mpchi']
+        l_box_mpchi = self.sim_box['l_mpc'] * cosmo_h
+        centre_mpchi = self.centre * l_box_mpchi
 
         param_dict['sim_name'] = self.config['sim_name']
-        param_dict['box_size_mpchi'] = self.sim_box['l_mpchi'] 
+        param_dict['box_size_mpchi'] = l_box_mpchi
         param_dict['centre_x_mpchi'] = centre_mpchi[0]
         param_dict['centre_y_mpchi'] = centre_mpchi[1]
         param_dict['centre_z_mpchi'] = centre_mpchi[2]
@@ -2382,19 +2384,22 @@ class ParticleLoad:
         param_dict['icgen_n_fft_mesh'] = fft_params['n_mesh']
         param_dict['icgen_highres_num_eff'] = fft_params['num_eff']
         param_dict['icgen_highres_n_eff'] = fft_params['num_eff']**(1/3)
-        param_dict['icgen_highres_l_mpchi'] = fft_params['l_mesh_mpchi']
+        param_dict['icgen_highres_l_mpchi'] = fft_params['l_mesh_mpc']*cosmo_h
 
         # Simulation-specific parameters
-        param_dict['sim_eps_dm_mpchi'] = eps['dm']
-        param_dict['sim_eps_dm_mpc'] = eps['dm'] / cosmo_h
+        param_dict['sim_eps_dm_mpc'] = eps['dm']
+        param_dict['sim_eps_dm_pmpc'] = eps['dm_proper']
+        param_dict['sim_eps_baryon_mpc'] = eps['baryons']
+        param_dict['sim_eps_baryon_pmpc'] = eps['baryons_proper']
+
+        param_dict['sim_eps_dm_mpchi'] = eps['dm'] * cosmo_h
+        param_dict['sim_eps_dm_pmpchi'] = eps['dm_proper'] * cosmo_h
+        param_dict['sim_eps_baryon_mpchi'] = eps['baryons'] * cosmo_h
+        param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper'] * cosmo_h
+
         param_dict['sim_eps_to_mips_background'] = (
             extra_params['background_eps_to_mips_ratio'])
-        param_dict['sim_eps_dm_pmpchi'] = eps['dm_proper']
-        param_dict['sim_eps_dm_pmpc'] = eps['dm_proper'] / cosmo_h
-        param_dict['sim_eps_baryon_mpchi'] = eps['baryons']
-        param_dict['sim_eps_baryon_mpc'] = eps['baryons'] / cosmo_h
-        param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper']
-        param_dict['sim_eps_baryon_pmpc'] = eps['baryons_proper'] / cosmo_h
+
         param_dict['sim_aexp_initial'] = 1 / (1 + extra_params['z_initial'])
         param_dict['sim_aexp_final'] = 1 / (1 + extra_params['z_final'])
         param_dict['sim_type'] = extra_params['sim_type']
