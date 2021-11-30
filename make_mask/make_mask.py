@@ -463,14 +463,6 @@ class MakeMask:
             ).T
         self.cell_coords += self.cell_size * 0.5
 
-        # ... and the same for the 'basic' (un-refined) mask
-        ind_sel_basic = np.where(self.basic_mask)
-        self.basic_cell_coords = np.vstack((
-            edges[ind_sel_basic[0]], edges[ind_sel_basic[1]],
-            edges[ind_sel_basic[2]]
-        )).T
-        self.basic_cell_coords += self.cell_size * 0.5
-
         # Find the box that (fully) encloses all selected cells, and the
         # side length of its surrounding cube
         self.mask_box, self.mask_widths = self.compute_bounding_box(
@@ -965,12 +957,11 @@ class MakeMask:
                             "as the attribute `grid_cell_width`.")
 
             db = f.create_dataset(
-                'Basic_Coordinates', data=np.array(self.basic_cell_coords))
-            db.attrs.create('Description',
-                            "Coordinates of the centres of the un-refined "
-                            "mask cells [Mpc].")
+                'BasicMask', data=np.array(self.basic_mask))
+            db.attrs.create('Description', "Unrefined boolean mask.")
 
             # Store attributes directly related to the mask as HDF5 attributes.
+            ds.attrs.create('mask_corners', self.mask_box)
             ds.attrs.create('bounding_length', self.mask_extent)
             ds.attrs.create('box_size', self.params['box_size'])
             ds.attrs.create('geo_centre', self.mask_centre)
