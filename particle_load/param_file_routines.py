@@ -43,21 +43,22 @@ def make_submit_file_for_icgen(params):
     """Make slurm submission script for IC-Gen."""
 
     # Make folder if it doesn't exist.
-    icgen_dir = f"{params['icgen_dir']}/ic_gen_submit_files/{params['f_name']}"
-    create_dir_if_needed(icgen_dir)
+    icgen_work_dir = f"{params['icgen_work_dir']}"
+    create_dir_if_needed(icgen_work_dir)
 
-    make_custom_copy('./templates/ic_gen/submit', f"{icgen_dir}/submit.sh",
-                         params, executable=True)
+    make_custom_copy(
+        './templates/ic_gen/submit', f"{icgen_work_dir}/submit.sh",
+        params, executable=True
+    )
     print("Generated submit file for IC-Gen.")
 
 def make_param_file_for_icgen(params):
     """Make a parameter file for IC-Gen."""
 
-    icgen_dir = f"{params['icgen_dir']}/ic_gen_submit_files/{params['f_name']}"
+    icgen_work_dir = f"{params['icgen_work_dir']}"
 
     # Make output folder for the ICs (should already be done in main code!)
-    icgen_output_dir = (
-        f"{params['icgen_dir']}/ic_gen_submit_files/{params['f_name']}/ICs/")
+    icgen_output_dir = f"{icgen_work_dir}/ICs/"
     create_dir_if_needed(icgen_output_dir)
 
     # What are the constraint phase descriptors?
@@ -90,7 +91,9 @@ def make_param_file_for_icgen(params):
     params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1   
 
     make_custom_copy(
-        './templates/ic_gen/params.inp', f"{icgen_dir}/params.inp", params)
+        './templates/ic_gen/params.inp', f"{icgen_work_dir}/params.inp",
+        params
+    )
 
     print("Generated parameter file for IC-Gen.")
 
@@ -99,7 +102,7 @@ def make_param_file_for_icgen(params):
 def make_submit_file_for_swift(params):
     """Make a SLURM submission script file for SWIFT."""
 
-    run_dir = f"{params['swift_run_dir']}/{params['f_name']}"
+    run_dir = f"{params['swift_run_dir']}/{params['sim_name']}"
     create_dir_if_needed(run_dir)
 
     submit_template = f"./templates/swift/{params['sim_type'].lower()}/submit"
@@ -124,7 +127,7 @@ def make_param_file_for_swift(params):
     sim_type = params['sim_type'].lower()
 
     # Make the run and output directories
-    run_dir = f"{params['swift_run_dir']}/{params['f_name']}"
+    run_dir = f"{params['swift_run_dir']}/{params['sim_name']}"
     create_dir_if_needed(run_dir + '/out_files')
 
     # Replace values.

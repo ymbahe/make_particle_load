@@ -159,7 +159,6 @@ class ParticleLoad:
 
             # In-/output options
             'output_formats': "Fortran, HDF5",
-            'output_dir': './ic_gen_data/',
             'glass_files_dir': './glass_files',
             'max_numpart_per_file': 400**3,
 
@@ -182,6 +181,12 @@ class ParticleLoad:
         cparams = {}
         for key in defdict:
             cparams[key] = params[key] if key in params else defdict[key]
+
+        if 'icgen_work_dir' in params:
+            cparams['icgen_work_dir'] = params['icgen_work_dir']
+        else:
+            cparams['icgen_work_dir'] = (
+                f"{params['icgen_object_dir']}/{params['sim_name']}")
 
         return cparams
 
@@ -232,6 +237,7 @@ class ParticleLoad:
             'icgen_constraint_phase_descriptor2_levels': '%dummy',
             'icgen_constraint_phase_descriptor_path': '%dummy',
             'icgen_constraint_phase_descriptor2_path': '%dummy',
+            'icgen_powspec_dir': '../..',
 
             # Softening parameters
             'comoving_eps_ratio': 1/20,
@@ -1775,8 +1781,7 @@ class ParticleLoad:
         self.repartition_particles()
 
         # Save particle load as a collection of HDF5 and/or Fortran files
-        save_dir = (f"{self.config['output_dir']}/ic_gen_submit_files/"
-                    f"{self.config['sim_name']}/particle_load")
+        save_dir = f"{self.config['icgen_work_dir']}/particle_load"
         save_dir_hdf5 = save_dir + '/hdf5'
         save_dir_bin = save_dir + '/fbinary'
 
@@ -1963,8 +1968,7 @@ class ParticleLoad:
         if comm_rank != 0:
             return
 
-        save_loc = (f"{self.config['output_dir']}/ic_gen_submit_files/"
-                    f"{self.config['sim_name']}/particle_load_info.hdf5")
+        save_loc = f"{self.config['icgen_work_dir']}/particle_load_info.hdf5"
         m_to_msun = self.sim_box['mass_msun']
         descr_m = (
             "Particle masses at each level in this zone, in units of the "
@@ -2341,7 +2345,7 @@ class ParticleLoad:
 
         centre_mpchi = self.centre * self.sim_box['l_mpchi']
 
-        param_dict['f_name'] = self.config['sim_name']
+        param_dict['sim_name'] = self.config['sim_name']
         param_dict['box_size_mpchi'] = self.sim_box['l_mpchi'] 
         param_dict['centre_x_mpchi'] = centre_mpchi[0]
         param_dict['centre_y_mpchi'] = centre_mpchi[1]
@@ -2355,7 +2359,7 @@ class ParticleLoad:
         param_dict['ics_z_init'] = extra_params['z_initial']
 
         # IC-Gen specific parameters
-        param_dict['icgen_dir'] = self.config['output_dir']
+        param_dict['icgen_work_dir'] = self.config['icgen_work_dir']
         param_dict['icgen_n_cores'] = n_cores_icgen
         param_dict['icgen_runtime_hours'] = extra_params['icgen_runtime_hours']
         param_dict['icgen_use_PH_ids'] = True
@@ -2364,7 +2368,9 @@ class ParticleLoad:
         param_dict['icgen_cut_t1t2'] = cut_type1_type2
         param_dict['icgen_cut_t2t3'] = cut_type2_type3
         param_dict['icgen_linear_powspec_file'] = (
-            self.cosmo['linear_powerspectrum_file'])
+            f"{extra_params['icgen_powspec_dir']}/"
+            f"{self.cosmo['linear_powerspectrum_file']}"
+        )
         param_dict['icgen_panphasian_descriptor'] = (
             extra_params['panphasian_descriptor'])
         param_dict['icgen_n_part_for_uniform_box'] = (
