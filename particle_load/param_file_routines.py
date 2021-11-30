@@ -13,7 +13,7 @@ from shutil import copy
 
 def make_all_param_files(params, codes):
     """Wrapper to generate all required param files."""
-    if 'icgen' in codes:
+    if 'ic_gen' in codes:
         make_param_file_for_icgen(params)
     if 'swift' in codes:
         make_param_file_for_swift(params)
@@ -25,7 +25,7 @@ def make_all_param_files(params, codes):
 
 def make_all_submit_files(params, codes):
     """Wrapper to generate all required submit files."""
-    if 'icgen' in codes:
+    if 'ic_gen' in codes:
         make_submit_file_for_icgen(params)
     if 'swift' in codes:
         make_submit_file_for_swift(params)
@@ -70,10 +70,12 @@ def make_param_file_for_icgen(params):
     else:
         params['icgen_is_constraint'] = 0
 
-    if params['icgen_constraint_phase_descriptor'] == '%dummy':
+    if params['icgen_num_constraints'] < 1:
+        params['icgen_constraint_phase_descriptor'] = '%dummy'
         params['icgen_constraint_phase_descriptor_path'] = '%dummy'   
-        params['icgen_constraint_phase_descriptor_levels'] = '%dummy'   
-    if params['icgen_constraint_phase_descriptor2'] == '%dummy':
+        params['icgen_constraint_phase_descriptor_levels'] = '%dummy'
+    if params['icgen_num_constraints'] < 2:
+        params['icgen_constraint_phase_descriptor2'] = '%dummy'
         params['icgen_constraint_phase_descriptor2_path'] = '%dummy'   
         params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'   
 
@@ -102,11 +104,23 @@ def make_param_file_for_icgen(params):
 def make_submit_file_for_swift(params):
     """Make a SLURM submission script file for SWIFT."""
 
-    run_dir = f"{params['swift_run_dir']}/{params['sim_name']}"
+    run_dir = f"{params['swift_run_dir']}"
     create_dir_if_needed(run_dir)
 
-    submit_template = f"./templates/swift/{params['sim_type'].lower()}/submit"
-    resub_template = f"./templates/swift/{params['sim_type'].lower()}/resubmit"
+    submit_template = f"./templates/swift/submit"
+    resub_template = f"./templates/swift/resubmit"
+
+    if params['sim_type'] == 'eaglexl':
+        params['swift_options'] = '--eagle'
+    elif params['sim_type'] in ['dmo', 'sibelius']:
+        params['swift_options'] = '--self-gravity'
+    else:
+        raise ValueError(f"Illegal sim_type {params['sim_type']}!")
+
+    if params['sim_type'] == 'sibelius':
+        params['extra_swift_options'] = '--fof params.yml'
+    else:
+        params['extra_swift_options'] = ''
 
     make_custom_copy(
         submit_template, f"{run_dir}/submit", params, executable=True)
@@ -127,7 +141,7 @@ def make_param_file_for_swift(params):
     sim_type = params['sim_type'].lower()
 
     # Make the run and output directories
-    run_dir = f"{params['swift_run_dir']}/{params['sim_name']}"
+    run_dir = f"{params['swift_run_dir']}"
     create_dir_if_needed(run_dir + '/out_files')
 
     # Replace values.

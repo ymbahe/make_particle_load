@@ -114,10 +114,10 @@ class ParticleLoad:
 
         # Define and enforce required parameters.
         required_params = [
-            'sim_name',
             'is_zoom',
+            'sim_name',
+            'identify_gas',
             'cosmology',
-            'zone1_gcell_load',
         ]
         for att in required_params:
             if att not in params:
@@ -150,7 +150,7 @@ class ParticleLoad:
         defdict = {
             # Basics
             'sim_name': None,
-            'is_zoom': None,
+            'is_zoom': False,
             'box_size': None,
             'mask_file': None,
             'uniform_particle_number': None,
@@ -158,9 +158,11 @@ class ParticleLoad:
             'identify_gas': False,
 
             # In-/output options
-            'output_formats': "Fortran, HDF5",
+            'output_formats': "Fortran",
             'glass_files_dir': './glass_files',
             'max_numpart_per_file': 400**3,
+            'icgen_object_dir': None,
+            'icgen_work_dir': None,
 
             # Zone separation options
             'gcube_n_buffer_cells': 2,
@@ -182,11 +184,21 @@ class ParticleLoad:
         for key in defdict:
             cparams[key] = params[key] if key in params else defdict[key]
 
-        if 'icgen_work_dir' in params:
-            cparams['icgen_work_dir'] = params['icgen_work_dir']
-        else:
+        if cparams['icgen_work_dir'] is None:
+            if cparams['icgen_object_dir'] is None:
+                raise ValueError(
+                    "Must specify either IC_Gen object or workdir.")
             cparams['icgen_work_dir'] = (
-                f"{params['icgen_object_dir']}/{params['sim_name']}")
+                f"{cparams['icgen_object_dir']}/{params['sim_name']}")
+
+        # If an object directory is specified and has the specified mask file,
+        # use that
+        if (cparams['icgen_object_dir'] is not None and
+            cparams['mask_file'] is not None):
+            obj_mask_file = (
+                f"{cparams['icgen_object_dir']}/{cparams['mask_file']}")
+            if os.path.isfile(obj_mask_file):
+                cparams['mask_file'] = obj_mask_file
 
         return cparams
 
@@ -211,26 +223,30 @@ class ParticleLoad:
             # Basic switches
             'generate_param_files': True,
             'generate_submit_files': True,
-            'code_types': 'ICGen, SWIFT',
+            'code_types': 'IC_Gen, SWIFT',
             
             # General simulation options
-            'z_initial': 127.0,
+            'z_initial': None,
             'z_final': 0.0,
             'sim_type': 'dmo',
             'dm_only_run': True,
 
             # IC-Gen specific parameters
-            'num_species': 2,
+            'icgen_exec': None,
+            'icgen_powerspec_dir': None,
+            'icgen_module_setup': None,
+            'icgen_num_species': 1,
             'icgen_fft_to_gcube_ratio': 1.0,
             'icgen_nmaxpart': 36045928,
             'icgen_nmaxdisp': 791048437,
             'icgen_runtime_hours': 4,
+            'icgen_use_PH_IDs': True,
             'icgen_PH_nbit': 21,
             'fft_min_Nyquist_factor': 2.0,
-            'fft_n_start': None,
+            'fft_n_base': 3,
             'icgen_multigrid': True,
-            'icgen_num_cores': 28,
             'panphasian_descriptor': None,
+            'icgen_num_constraints': 0,
             'icgen_constraint_phase_descriptor': '%dummy',
             'icgen_constraint_phase_descriptor2': '%dummy',
             'icgen_constraint_phase_descriptor_levels': '%dummy',
@@ -242,7 +258,7 @@ class ParticleLoad:
             # Softening parameters
             'comoving_eps_ratio': 1/20,
             'proper_eps_ratio': 1/45,            
-            'background_eps_to_mips_ratio': 0.02,
+            'background_eps_ratio': 0.02,
             
             # SWIFT specific options
             'swift_run_dir': None,
@@ -252,12 +268,11 @@ class ParticleLoad:
             'swift_exec': '../swiftsim/examples/swift',
             'swift_num_nodes': 1,
             'swift_runtime_hours': 72,
-
-            # GADGET specific options
-            'gadget_num_cores': 32,
-            'gadget_exec': './gadget/P-Gadget3-DMO-NoSF',            
+            'swift_module_setup': None,
 
             # System-specific parameters
+            'slurm_partition': None,
+            'slurm_account': None,
             'memory_per_core': 18.2e9,
             'num_cores_per_node': 28,
         }
@@ -265,6 +280,26 @@ class ParticleLoad:
         xparams = {}
         for key in defdict:
             xparams[key] = params[key] if key in params else defdict[key]
+
+        if xparams['icgen_num_species'] is None:
+            xparams['icgen_num_species'] = 2 if self.config['is_zoom'] else 1
+
+        if xparams['generate_param_files']:
+            if 'ic_gen' in xparams['code_types'].lower():
+                if xparams['panphasian_descriptor'] is None:
+                    raise ValueError(
+                        "Panphasian descriptor must be specified to set up "
+                        "the IC_Gen param file!")
+                if xparams['icgen_powerspec_dir'] is None:
+                    raise ValueError(
+                        "Directory of power spectrum files must be specified "
+                        "to set up the IC_Gen param file!")
+        if xparams['generate_submit_files']:
+            if 'ic_gen' in xparams['code_types'].lower():
+                if xparams['icgen_exec'] is None:
+                    raise ValueError(
+                        "IC_Gen executable must be specified to set up "
+                        "the IC_Gen submit file!")
 
         return xparams
 
@@ -2072,7 +2107,7 @@ class ParticleLoad:
         if comm_rank != 0:
             return
 
-        n_fft_start = self.extra_params['fft_n_start']
+        n_fft_start = self.extra_params['fft_n_base']
         f_Nyquist = self.extra_params['fft_min_Nyquist_factor']
 
         fft = self.compute_fft_highres_grid()
@@ -2328,7 +2363,7 @@ class ParticleLoad:
         cut_type1_type2 = 0.0    # Dummy value if not needed
         cut_type2_type3 = 0.0    # Dummy value if not needed
         if self.config['is_zoom']:
-            num_species = extra_params['num_species']
+            num_species = extra_params['icgen_num_species']
             if num_species >= 2:
                 cut_type1_type2 = np.log10(
                     np.mean(self.gcell_info['particle_masses'][0:2]))
@@ -2361,12 +2396,18 @@ class ParticleLoad:
         param_dict['ics_z_init'] = extra_params['z_initial']
 
         # IC-Gen specific parameters
+        param_dict['icgen_exec'] = extra_params['icgen_exec']
+        if extra_params['icgen_module_setup'] is None:
+            param_dict['icgen_module_setup'] = ''
+        else:
+            param_dict['icgen_module_setup'] = (
+                f"source {extra_params['icgen_module_setup']}")
         param_dict['icgen_work_dir'] = self.config['icgen_work_dir']
         param_dict['icgen_n_cores'] = n_cores_icgen
         param_dict['icgen_runtime_hours'] = extra_params['icgen_runtime_hours']
-        param_dict['icgen_use_PH_ids'] = True
+        param_dict['icgen_use_PH_ids'] = extra_params['icgen_use_PH_IDs']
         param_dict['icgen_PH_nbit'] = extra_params['icgen_PH_nbit']
-        param_dict['icgen_num_species'] = extra_params['num_species']
+        param_dict['icgen_num_species'] = extra_params['icgen_num_species']
         param_dict['icgen_cut_t1t2'] = cut_type1_type2
         param_dict['icgen_cut_t2t3'] = cut_type2_type3
         param_dict['icgen_linear_powspec_file'] = (
@@ -2377,6 +2418,8 @@ class ParticleLoad:
             extra_params['panphasian_descriptor'])
         param_dict['icgen_n_part_for_uniform_box'] = (
             self.sim_box['num_part_equiv'])
+        param_dict['icgen_num_constraints'] = (
+            extra_params['icgen_num_constraints'])
         for key_suffix in ['', '2', '_path', '_levels', '2_path', '2_levels']:
             param_dict[f'icgen_constraint_phase_descriptor{key_suffix}'] = (
             extra_params[f'icgen_constraint_phase_descriptor{key_suffix}'])
@@ -2398,7 +2441,7 @@ class ParticleLoad:
         param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper'] * cosmo_h
 
         param_dict['sim_eps_to_mips_background'] = (
-            extra_params['background_eps_to_mips_ratio'])
+            extra_params['background_eps_ratio'])
 
         param_dict['sim_aexp_initial'] = 1 / (1 + extra_params['z_initial'])
         param_dict['sim_aexp_final'] = 1 / (1 + extra_params['z_final'])
@@ -2412,7 +2455,15 @@ class ParticleLoad:
         param_dict['swift_exec'] = extra_params['swift_exec']
         param_dict['swift_gas_splitting_threshold_1e10msun'] = (
             self.find_gas_splitting_mass())
-    
+        if extra_params['swift_module_setup'] is None:
+            param_dict['swift_module_setup'] = ''
+        else:
+            param_dict['swift_module_setup'] = (
+                f"source {extra_params['swift_module_setup']}")
+        param_dict['slurm_partition'] = extra_params['slurm_partition']
+        param_dict['slurm_account'] = extra_params['slurm_account']
+        param_dict['num_cores_per_node'] = extra_params['num_cores_per_node']
+
         return param_dict       
 
     def find_gas_splitting_mass(self):

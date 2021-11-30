@@ -3,19 +3,15 @@
 #SBATCH --ntasks=$icgen_n_cores
 #SBATCH --job-name=$sim_name
 #SBATCH --output=log_%j.txt
-#SBATCH --partition=cosma7
-#SBATCH --account=dp004
+#SBATCH --partition=$slurm_partition
+#SBATCH --account=$slurm_account
 #SBATCH --exclusive
 #SBATCH --time=$icgen_runtime_hours:00:00
 
-module purge
-module load intel_comp/2018 intel_mpi/2018 fftw/2.1.5 gsl/2.4 hdf5/1.10.3
-
-cd ../../
+$icgen_module_setup
 
 mpirun -env I_MPI_PIN=1 -env I_MPI_PIN_PROCESSOR_LIST=allcores \
- -np $$SLURM_NTASKS \
- ../../IC_Gen.x ./params.inp
+ -np $$SLURM_NTASKS $icgen_exec ./params.inp
 
 echo "Job done, info follows..."
 sacct -j $$SLURM_JOBID --format=JobID,JobName,Partition,AveRSS,MaxRSS,AveVMSize,MaxVMSize,Elapsed,ExitCode

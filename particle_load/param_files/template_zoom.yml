@@ -1,0 +1,59 @@
+# Template parameter file for zoom runs, including only "typical" options
+# See template.yml for all available options.
+
+# MAIN PARTICLE LOAD PARAMETERS #
+sim_name:            my_ics           # [REQUIRED] A label for the ICs, used amongst others as the base name for ICs files.
+cosmology:           Planck2018       # [REQUIRED] The cosmology to be used by IC_Gen and (if enabled) written to the simulation parameter file. Must be one of 'Planck2013' or 'Planck2018'.
+target_mass:         1e10             # [Semi-optional] Desired mass of target-resolution particles; the actually used mass is generally slightly different to accommodate an integer cube number of glass files. If it is not specified, uniform_particle_number must be.
+
+# BARYON GENERATION #
+identify_gas:            False        # Should gas particles directly be identified in the particle load?
+dm_to_gas_number_ratio:  None         # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle numbers? If not specified (or None), dm_to_gas_mass_ratio must be.
+dm_to_gas_mass_ratio:    1.0          # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle masses? If not spefified (or None), dm_to_gas_number_ratio must be.    
+
+# I/O SETTINGS #
+icgen_object_dir:      /path/to/base/dir/suite/ICs/object   # [Semi-optional] IC_Gen base directory for all ICs of this object. If it is not specified, icgen_work_dir must be.
+
+# PARTICLE LOAD DETAILS #
+zone1_type:                 glass         # Pattern type to use for highest-resolution gcells: `glass' (default) or `grid'.
+zone2_type:                 glass         # Pattern type to use for Zone-II gcells: `glass' (default) or `grid'.
+
+# ZOOM-SPECIFIC OPTIONS #
+is_zoom:               True             # [REQUIRED] Is this a zoom simulation?
+mask_file:             mask_file.hdf5   # [REQUIRED] The mask file to use for the particle load (only significant if is_zoom is True). If icgen_object_dir is specified and mask_file exists in it, this is used. Otherwise, it must be an absolute path or relative to the current working directory.
+
+# HIGH-LEVEL OPTIONS FOR SETTING UP SUBSEQUENT CODES #
+generate_param_files:   True           # Auto-generate parameter files (default: True)?
+generate_submit_files:  True           # Auto-generate submit files (default: True)?
+code_types:             IC_Gen, SWIFT  # Codes to generate files for (Default: IC_Gen, SWIFT)
+z_initial:              127.0          # [REQUIRED] Redshift to generate ICs at (only needed if param or submit files are to be generated).
+
+# OPTIONS FOR SETTING UP IC_GEN #
+panphasian_descriptor:   "[Panph1,L16,(31250,23438,39063),S12,CH1050187043,EAGLE_L0100_VOL1]"      # [REQUIRED] String encoding the phases to use for the ICs from the Panphasia field.
+icgen_exec:               ../../IC_Gen.x    # [REQUIRED] Location of IC_Gen executable (absolute or relative to icgen_work_dir).
+icgen_powerspec_dir:      ../..      # [REQUIRED] Directory containing the power spectrum file (absolute or relative to icgen_work_dir).
+icgen_module_setup:       ~/.module_load_icgen   # [REQUIRED] File to source in order to set up the correct environment for IC_Gen (None to not source anything). 
+icgen_use_PH_IDs:         True        # Assign Particle IDs based on Peano-Hilbert index (default: True)?
+icgen_PH_nbit:            21          # Depth of Peano-Hilbert grid for assigning particle IDs (default: 21).
+fft_n_base:               3           # Base factor for FFT grid size; FFT grid is a power of two times this number. Must be consistent with what was used to calculate Panphasian descriptor (default: 3).
+icgen_runtime_hours:      4           # Runtime in hours to request for IC_Gen job (default: 4).
+
+# OPTIONS FOR SETTING UP SIMULATION RUNS #
+z_final:               0.0               # Redshift to which the simulation should run (default: 0).
+comoving_eps_ratio:    0.05              # Co-moving softening length in units of the mean inter-particle separation (default: 0.05).
+proper_eps_ratio:      0.022222          # Maximum proper softening length in units of the mean inter-particle separation at z = 0 (default: 1/45).
+background_eps_ratio:  0.02              # Co-moving softening length of tidal particles in units of their mean inter-particle separation (default: 0.02).
+
+# OPTIONS FOR SETTING UP SWIFT RUNS #
+swift_run_dir:         /path/to/base/dir/suite/sim_name   # [REQUIRED]Base directory of SWIFT run.
+swift_num_nodes:       1                  # [REQUIRED] Number of nodes to use for SWIFT run.
+swift_runtime_hours:   72                 # [REQUIRED] Run time for SWIFT job in hours.
+swift_ics_dir:         /path/to/base/dir/suite/ICs/  # [REQUIRED] Directory containing final ICs in SWIFT-compatible format.
+swift_exec:            ../swiftsim/examples/swift    # [REQUIRED] Location of SWIFT executable, either absolute or relative to swift_run_dir.
+swift_module_setup:    ~/.module_load_swift          # [REQUIRED] File to source in order to set up the correct environment for SWIFT (None to not source anything).
+
+# PARAMETERS FOR TARGET SYSTEM #
+slurm_partition:        partition      # [REQUIRED] Name of the partition to use for SLURM job sumbission.
+slurm_account:          account        # [REQUIRED] Name of the account to use for SLURM job submission.
+memory_per_core:        18.2e9         # [REQUIRED] Available memory per core on the system [GB].
+num_cores_per_node:     28             # [REQUIRED] Number of cores per node.
