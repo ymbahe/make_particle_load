@@ -13,9 +13,10 @@
 $swift_module_setup
 
 mpirun -np $$SLURM_NTASKS $swift_exec -v 1 \
-	--pin --cosmology --self-gravity \
-	--threads=$$SLURM_CPUS_PER_TASK \
-	params.yml
+    --pin --threads=$$SLURM_CPUS_PER_TASK \
+	--cosmology \
+	$swift_options \
+	params.yml $extra_swift_options
 
 echo "Job done, info follows..."
 sacct -j $$SLURM_JOBID --format=JobID,JobName,Partition,AveRSS,MaxRSS,AveVMSize,MaxVMSize,Elapsed,ExitCode

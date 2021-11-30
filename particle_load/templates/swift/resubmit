@@ -1,0 +1,23 @@
+#!/bin/bash -l
+
+#SBATCH --ntasks=$swift_num_nodes
+#SBATCH -J $sim_name
+#SBATCH -o ./out_files/%x.%J.swift.out
+#SBATCH -e ./out_files/%x.%J.swift.err
+#SBATCH -p $slurm_partition
+#SBATCH -A $slurm_account
+#SBATCH --exclusive
+#SBATCH --cpus-per-task=$num_cores_per_node
+#SBATCH --time=$swift_runtime_hours:00:00
+
+$swift_module_setup
+
+mpirun -np $$SLURM_NTASKS $swift_exec -v 1 \
+    --pin --threads=$$SLURM_CPUS_PER_TASK \
+	--cosmology \
+	$swift_options \
+	--restart \
+	params.yml $extra_swift_options
+
+echo "Job done, info follows..."
+sacct -j $$SLURM_JOBID --format=JobID,JobName,Partition,AveRSS,MaxRSS,AveVMSize,MaxVMSize,Elapsed,ExitCode
