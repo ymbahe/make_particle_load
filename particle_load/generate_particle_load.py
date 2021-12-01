@@ -1965,11 +1965,16 @@ class ParticleLoad:
             The one-beyond-last index of local particle array to write.
 
         """
+        if start is None:
+            start = 0
+        if end is None:
+            end = self.nparts['tot_local']
+        num_in_file = end - start
         f = FortranFile(save_loc, mode="w")
 
         # Write first 4+8+4+4+4 = 24 bytes
         f.write_record(
-            np.int32(self.nparts['tot_local']),
+            np.int32(num_in_file),
             np.int64(self.nparts['tot_all']),
             np.int32(index),        # Index of this file
             np.int32(comm_size),    # Total number of files
@@ -1986,9 +1991,9 @@ class ParticleLoad:
         )
 
         # Write actual data
-        f.write_record(self.parts['pos'][:, 0].astype(np.float64))
-        f.write_record(self.parts['pos'][:, 1].astype(np.float64))
-        f.write_record(self.parts['pos'][:, 2].astype(np.float64))
+        f.write_record(self.parts['pos'][start:end, 0].astype(np.float64))
+        f.write_record(self.parts['pos'][start:end, 1].astype(np.float64))
+        f.write_record(self.parts['pos'][start:end, 2].astype(np.float64))
         f.write_record(self.parts['m'].astype("float32"))
         f.close()
 
