@@ -273,6 +273,7 @@ class ParticleLoad:
             # System-specific parameters
             'slurm_partition': None,
             'slurm_account': None,
+            'slurm_email': None,
             'memory_per_core': 18.2e9,
             'num_cores_per_node': 28,
         }
@@ -2462,6 +2463,7 @@ class ParticleLoad:
                 f"source {extra_params['swift_module_setup']}")
         param_dict['slurm_partition'] = extra_params['slurm_partition']
         param_dict['slurm_account'] = extra_params['slurm_account']
+        param_dict['slurm_email'] = extra_params['slurm_email']
         param_dict['num_cores_per_node'] = extra_params['num_cores_per_node']
 
         return param_dict       
