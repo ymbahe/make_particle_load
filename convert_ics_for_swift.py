@@ -26,6 +26,7 @@ class SwiftICs:
         if not os.path.isfile(in_file):
             raise OSError(f"Specified input file '{in_file}' not found!")
         self.header = self.load_header(in_file)
+        self.meta = self.load_meta_data(args)
         num_input_files = self.header['NumFilesPerSnapshot']
         self.num_parts = self.header['NumPart_Total']
 
@@ -85,6 +86,18 @@ class SwiftICs:
         if 'Coordinates' in parts:
             parts['Coordinates'] /= self.header['HubbleParam']
         return parts
+
+    def load_meta_data(self, args):
+        pl_meta_file = args.pl_meta_file
+        meta = {}
+        with h5.File(pl_meta_file, 'r') as f:
+            att = f['Header'].attrs
+            meta['OmegaDM'] = att('OmegaDM')
+            meta['OmegaLambda'] = att('OmegaLambda')
+            meta['OmegaBaryon'] = att('OmegaBaryon')
+            meta['N_part_equiv'] = att('N_part_equiv')
+
+        return meta
 
     def isolate_gas(self, args):
         """Isolate gas particles, if desired."""
@@ -166,6 +179,10 @@ class SwiftICs:
                 for key in self.pt2:
                     pt2[key] = self.pt2[key]
 
+            # Bake in metadata for simulation setup
+            m = f.create_group('Metadata')
+            for key in self.meta:
+                m.attrs[key] = self.meta[key]
 
 def parse_arguments():
     """Parse the command-line arguments."""

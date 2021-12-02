@@ -2026,6 +2026,9 @@ class ParticleLoad:
             g.attrs.create('NumPart_Equiv', self.sim_box['num_part_equiv'])
             g.attrs.create('N_Part_Equiv', self.sim_box['n_part_equiv'])
 
+            for key in self.cosmo:
+                g.attrs[key] = self.cosmo[key]
+
             g = f.create_group('ZoneI')
             g.attrs['m_gas'] = self.gcell_info['zone1_m_gas']
             g.attrs['m_gas_msun'] = self.gcell_info['zone1_m_gas'] * m_to_msun
