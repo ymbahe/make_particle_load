@@ -1825,7 +1825,9 @@ class ParticleLoad:
 
         num_files_per_rank = self.find_fortran_file_split()
         separation_indices = np.linspace(
-            self.parts['m'].shape[0], num_files_per_rank+1, endpoint=True)
+            0, self.parts['m'].shape[0], num=num_files_per_rank+1,
+            dtype=int, endpoint=True
+        )
 
         # Make sure to save no more than max_save files at a time.
         max_save = 50
