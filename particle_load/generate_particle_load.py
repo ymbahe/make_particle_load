@@ -24,6 +24,16 @@ import auxiliary_tools as cy
 
 from pdb import set_trace
 
+# Append modules directory to PYTHONPATH
+sys.path.append(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir,
+        "tools"
+    )
+)
+from timestamp import TimeStamp
+
 comm = MPI.COMM_WORLD
 comm_rank = comm.Get_rank()
 comm_size = comm.Get_size()
@@ -31,7 +41,6 @@ comm_size = comm.Get_size()
 rng = np.random.default_rng()
 
 # ** TO DO **
-# - Change internal units from h^-1 Mpc to Mpc, *only* add h^-1 for IC-Gen.
 # - Tidy up output
 
 class ParticleLoad:
@@ -75,6 +84,8 @@ class ParticleLoad:
         print("  PARTICLE LOAD GENERATOR   ")
         print("----------------------------")
 
+        ts = TimeStamp()
+        
         # Read and process the parameter file.
         self.read_param_file(param_file)
         self.sim_box = self.initialize_sim_box()
@@ -84,11 +95,16 @@ class ParticleLoad:
         self.compute_box_mass()
         self.get_target_resolution()
 
+        ts.set_time('Setup')
+        
         # Generate particle load.
         self.nparts = {}
         self.scube = {}
-        self.parts = self.make_particle_load(only_calc_ntot=only_calc_ntot)
+        self.parts, tss = self.make_particle_load(only_calc_ntot=only_calc_ntot)
 
+        ts.import_times(tss)
+        ts.set_time('Make particle load')
+        
         # Generate param and submit files, if desired (NOT YET IMPLEMENTED).
         if comm_rank == 0:
             self.create_param_and_submit_files(
@@ -98,10 +114,16 @@ class ParticleLoad:
 
         # Save particle load
         if save_data:
-            self.save_particle_load(randomize=randomize)
+            tss = self.save_particle_load(randomize=randomize)
+            ts.import_times(tss)
+        ts.set_time('Save particle load')
         if save_metadata:
-            self.save_metadata()
+            tss = self.save_metadata()
+            ts.import_times(tss)
+        ts.set_time('Save metadata')
 
+        ts.print_time_usage('Finished')
+            
     def read_param_file(self, param_file: str) -> None:
         """Read in parameters for run."""
 
@@ -518,54 +540,68 @@ class ParticleLoad:
             print('Generating particle load...')
             print('---------------------------\n')
 
+        ts = TimeStamp()
+        ts.add_counters(['Other'])
+        
         # --------------------------------------------------------------------
         # --- Act I: Preparation (find structure and number of particles) ---
         # -------------------------------------------------------------------- 
 
         # Set up the gcube and generate local gcells
         self.gcube = self.set_up_gcube()
-
+        ts.set_time('Set up gcube')
+        
         # Prepare uniform grid cell structure within gcube
         # (sets up self.gcell_info)
         gcells = self.generate_gcells()
-
+        ts.set_time('Generate gcells')
+        
         # Prepare the cubic shell structure filling the outer box (Zone III)
         # (sets up self.scube dict)
         self.prepare_zone3_particles()
-
+        ts.set_time('Prepare Zone-III particles')
+        
         if comm_rank == 0:
             self.print_particle_load_info(gcells)
 
         # If this is a "dry run" and we only want the particle number, quit.
         if only_calc_ntot:
-            return
+            return ts
 
         # -------------------------------------------------------------------
         # ------ Act II: Creation (generate and verify particles) ----------
         # -------------------------------------------------------------------
 
         # Initiate particle arrays.
+        ts.increase_time('Other')
         pos = np.zeros((self.nparts['tot_local'], 3), dtype='f8') - 1e30
+        ts.set_time('Create particle position arrays')
         masses = np.zeros(self.nparts['tot_local'], dtype='f8') - 1
+        ts.set_time('Create particle mass arrays')
         parts = {'pos': pos, 'm': masses}
-
+        ts.set_time('Dictize particle arrays')
+                
         # Magic, part I: populate local gcells with particles (Zone I/II)
-        self.generate_gcube_particles(gcells, parts)
-         
+        self.generate_gcube_particles(gcells, parts, ts)
+        #ts.set_time('Generate Zone-I/II particles')
+        
         # Magic, part II: populate outer region with particles (Zone III)
         self.generate_zone3_particles(parts)
-
+        ts.set_time('Generate Zone-III particles')
+        
         # -------------------------------------------------------------------
         # --- Act III: Transformation (shift coordinate system to target) ---
         # -------------------------------------------------------------------
 
         # Make sure that the particles are sensible before shifting
         self.verify_particles(parts)
+        ts.set_time('Overall particle verification')
 
         # Move particle load to final position in the simulation box
         self.shift_particles_to_target_position(parts)
-
-        return parts
+        ts.set_time('Shift particles to target positions')
+        
+        return parts, ts
 
     def set_up_gcube(self):
         """
@@ -1365,7 +1401,7 @@ class ParticleLoad:
               f"{max_parts_per_file:,} particles per file: "
               f"{int(np.ceil(np_tot / max_parts_per_file))}")
 
-    def generate_gcube_particles(self, gcells, parts):
+    def generate_gcube_particles(self, gcells, parts, ts):
         """
         Generate the particles that fill the mask cube.
 
@@ -1473,19 +1509,27 @@ class ParticleLoad:
                 f"particles in Zone I/II."
             )
 
+        ts.set_time('Generate gcube particles')
+            
         # Scale coordinates to units of the simulation box size (i.e. such
         # that the edges of the simulation box (not gcube!) are at coordinates 
         # -0.5 and 0.5.
         gcube_range_inds = np.array((-0.5, 0.5)) * gcube['n_cells']
         gcube_range_boxfrac = (np.array((-0.5, 0.5)) * gcube['sidelength'])
+        if comm_rank == 0:
+            print(f"Re-scaling particle coordinates...", end='')
         rescale(parts['pos'][:, :num_parts_created],
                 gcube_range_inds, gcube_range_boxfrac, in_place=True)
-
+        ts.set_time('Re-scale gcube particle coordinates')
+        if comm_rank == 0:
+            print(f" done (took {ts.get_time():.3e} sec.)")
+            
         # Do consistency checks in separate function for clarity.
-        self._verify_gcube_region(parts, num_parts_created, gcube['volume'])
+        self._verify_gcube_region(parts, num_parts_created, gcube['volume'], ts)
+        #ts.set_time('Verify gcube particles')
         if comm_rank == 0:
             print(f"--> Finished generating gcube particles in "
-                  f"{time.time() - stime:.3e} sec.")
+                  f"{ts.get_time():.3e} sec.")
 
     def load_glass_files(self):
         """
@@ -1583,15 +1627,17 @@ class ParticleLoad:
 
         return kernel_masses, {'dm': m_dm, 'gas': m_gas}
 
-    def _verify_gcube_region(self, parts, nparts_created, gvolume):
+    def _verify_gcube_region(self, parts, nparts_created, gvolume, ts):
         """
         Perform consistency checks and print info about high-res region.
         This is a subfunction of `populate_gcells()`.
         """
+        ts.increase_time('Other')
         # Make sure that the coordinates are in the expected range
         if np.max(np.abs(parts['pos'][:nparts_created])) > 0.5:
             raise ValueError("Invalid Zone I/II coordinate values!")
-
+        ts.set_time('   _verify: check coordinate ranges')
+        
         # Make sure that we have allocated the right mass (fraction)
         tot_hr_mass = comm.allreduce(np.sum(parts['m'][:nparts_created]))
         if np.abs(tot_hr_mass - gvolume) > 1e-6:
@@ -1605,16 +1651,19 @@ class ParticleLoad:
             print(f"Verified total Zone I/II mass fractions\n"
                   f"   ({tot_hr_mass:.2e}, ideal = {gvolume:.2e}, "
                   f"deviation = {m_dev * 100:.2e}%).")
-
+        ts.set_time('   _verify: check mass fractions')
+            
         # Find and print the centre of mass of the Zone I/II particles
         # (N.B.: slicing creates views, not new arrays --> no memory overhead)
         com = centre_of_mass_mpi(
             parts['pos'][: nparts_created], parts['m'][:nparts_created])
-
+        ts.set_time('   _verify: check centre of mass')
+        
         if comm_rank == 0:
             print(f"Centre of mass for high-res grid particles:\n"
                   f"[{com[0]:.2f}, {com[1]:.2f}, {com[2]:.2f}] Mpc/h."
             )
+            print(f"Finished verifying gcube in {ts.get_time():.3e} sec.")
 
     def generate_zone3_particles(self, parts):
         """
@@ -1692,7 +1741,8 @@ class ParticleLoad:
 
     def verify_particles(self, parts):
         """Perform safety checks on all generated particles."""
-
+        ts = TimeStamp()
+        
         if comm_rank == 0:
             print("")
         npart_local = self.nparts['tot_local']
@@ -1713,9 +1763,11 @@ class ParticleLoad:
                     f"min={np.min(parts['m'])}, "
                     f"max={np.max(parts['m'])}."
                 )
-
+        ts.set_time('Check pos and mass ranges')
+            
         # Check that the total masses add up to 1.
         total_mass_fraction = comm.allreduce(np.sum(parts['m']))
+        ts.set_time('Check cross MPI mass total')
         mass_error_fraction = 1 - total_mass_fraction
         if np.abs(mass_error_fraction) > 1e-5:
             raise ValueError(
@@ -1728,9 +1780,11 @@ class ParticleLoad:
                 f"**********\n   WARNING!!! \n***********\n"
                 f"Error in total mass fraction is {mass_error_fraction}."
             )
-
+        ts.set_time('Check mass error')
+            
         # Find the (cross-MPI) centre of mass, should be near origin.
         com = centre_of_mass_mpi(parts['pos'], parts['m'])
+        ts.set_time('Check centre of mass')
         if comm_rank == 0:
             print(f"Centre of mass for all particles (in units of the box "
                   f"size): [{com[0]:.2f}, {com[1]:.2f}, {com[2]:.2f}].")
@@ -1748,6 +1802,10 @@ class ParticleLoad:
                 f"({self.nparts['tot_all']**(1/3):.2f}^3) particles."
             )
 
+        ts.set_time('Final messages')
+        ts.print_time_usage('Finished verify_particles')
+        
+            
     def shift_particles_to_target_position(self, parts):
         """
         Move the centre of the high-res region to the desired point.
@@ -1762,11 +1820,14 @@ class ParticleLoad:
         """
         # Shift particles to the specified centre (note that self.centre
         # is already in the range 0 --> 1, so that's all we need)...
+        ts = TimeStamp()
         parts['pos'] += self.centre
-
+        ts.set_time('Shift positions')
+        
         # ... and then apply periodic wrapping (simple: range is 0 --> 1).
         parts['pos'] %= 1.0
-
+        ts.set_time('Do periodic wrapping')
+        
         if comm_rank == 0:
             print(f"\nShifted particles such that the Lagrangian centre of "
                   f"high-res region is at\n   "
@@ -1774,6 +1835,10 @@ class ParticleLoad:
                   f"{self.centre[2]:.3f}."
             )
 
+        ts.set_time('Print message')
+        ts.print_time_usage('Finished shift_particles')
+        
+            
     # ------------- Routines for saving the particle load -------------------
 
     def save_particle_load(self, randomize=False):
@@ -1795,6 +1860,7 @@ class ParticleLoad:
         None
 
         """
+        ts = TimeStamp()
         output_formats = self.config['output_formats'].lower()
         save_as_hdf5 = 'hdf5' in output_formats
         save_as_fortran_binary = 'fortran' in output_formats
@@ -1811,8 +1877,10 @@ class ParticleLoad:
             self.parts['m'] = self.parts['m'][idx]
 
         # Load balance across MPI ranks.
+        ts.set_time('Output setup')
         self.repartition_particles()
-
+        ts.set_time('Repartitioning particles')
+        
         # Save particle load as a collection of HDF5 and/or Fortran files
         save_dir = f"{self.config['icgen_work_dir']}/particle_load"
         save_dir_hdf5 = save_dir + '/hdf5'
@@ -1824,10 +1892,16 @@ class ParticleLoad:
             if not os.path.exists(save_dir_bin) and save_as_fortran_binary:
                 os.makedirs(save_dir_bin)
 
+        # Split local particle load into appropriate number of files
         num_files_per_rank = self.find_fortran_file_split()
+        num_files_all = num_files_per_rank * comm_size
         separation_indices = np.linspace(
-            self.parts['m'].shape[0], num_files_per_rank+1, endpoint=True)
+            0, self.parts['m'].shape[0], num=num_files_per_rank+1,
+            endpoint=True, dtype=int
+        )
 
+        ts.set_time('Prepare saving')
+        
         # Make sure to save no more than max_save files at a time.
         max_save = 50
         n_batch = int(np.ceil(comm_size / max_save))
@@ -1844,7 +1918,9 @@ class ParticleLoad:
                         start_index = separation_indices[iifile]
                         end_index = separation_indices[iifile+1]
                         self.save_local_particles_as_binary(
-                            ifile, fortran_loc, start_index, end_index)
+                            ifile, num_files_all, fortran_loc,
+                            start_index, end_index
+                        )
 
                 if self.verbose:
                     print(
@@ -1855,11 +1931,16 @@ class ParticleLoad:
             # at the same time.
             comm.barrier()
 
+        ts.set_time('Write output')
+        return ts
+        
     def repartition_particles(self):
         """Re-distribute particles across MPI ranks to achieve equal load."""
         if comm_size == 0:
+            print("Que?")
             return
 
+        ts = TimeStamp()
         num_part_all = self.nparts['tot_all']
         num_part_local = self.nparts['tot_local']
         num_part_min = comm.allreduce(num_part_local, op=MPI.MIN)
@@ -1881,9 +1962,11 @@ class ParticleLoad:
                 f"Current load ranges from "
                 f"{num_part_min} to {num_part_max} particles."
             )
-
+        ts.set_time('Setup')
+            
         self.parts['m'] = pf.repartition(
             self.parts['m'], num_per_rank, comm, comm_rank, comm_size) 
+        ts.set_time('Mass repartitioning')
         num_part_new = len(self.parts['m'])
 
         # Because we repartition the coordinates individually, we first
@@ -1892,20 +1975,26 @@ class ParticleLoad:
             self.parts['pos'] = np.resize(
                 self.parts['pos'], (num_part_new, 3))
             self.parts['pos'][self.nparts['tot_local']: , : ] = -1
-
+        ts.set_time('Coordinate array shift')
         for idim in range(3):
             self.parts['pos'][: num_part_new, idim] = pf.repartition(
             self.parts['pos'][:, idim], num_per_rank,
             comm, comm_rank, comm_size
         )
+        ts.set_time('Coordinate repartitioning')
+
         if num_part_new < self.nparts['tot_local']:
             self.parts['pos'] = self.parts['pos'][:num_part_new, :]
-
+        ts.set_time('Coordinate cutting')
+            
         self.nparts['tot_local'] = num_part_new
 
         if comm_rank == 0:
             print('Done with load balancing.')
 
+        ts.set_time('Finishing')
+        ts.print_time_usage('Finished repartitioning')
+            
     def find_fortran_file_split(self):
         """Work out how many Fortran files to write per rank."""
         max_num_per_file = self.config['max_numpart_per_file']
@@ -1950,7 +2039,7 @@ class ParticleLoad:
             print(f"Done saving local particles to '{save_loc}'.")
 
     def save_local_particles_as_binary(
-        self, index, save_loc, start=None, end=None):
+        self, index, tot_num_files, save_loc, start=None, end=None):
         """
         Write (part of) local particle load to Fortran binary file `save_loc`.
 
@@ -1958,6 +2047,8 @@ class ParticleLoad:
         ----------
         index : int
             The (numerical) index of the file to write (starting from 0).
+        tot_num_files : int
+            The total number of files, across all ranks.
         save_loc : str
             The file to write data to.
         start : int
@@ -1971,14 +2062,15 @@ class ParticleLoad:
         if end is None:
             end = self.nparts['tot_local']
         num_in_file = end - start
+        
         f = FortranFile(save_loc, mode="w")
 
         # Write first 4+8+4+4+4 = 24 bytes
         f.write_record(
             np.int32(num_in_file),
             np.int64(self.nparts['tot_all']),
-            np.int32(index),        # Index of this file
-            np.int32(comm_size),    # Total number of files
+            np.int32(index),          # Index of this file
+            np.int32(tot_num_files),  # Total number of files
             np.int32(0),
             
             # Now we pad the header with 6 zeros to make the header length
@@ -2003,8 +2095,10 @@ class ParticleLoad:
 
     def save_metadata(self):
         """Save the metadata to an HDF5 file."""
+        ts = TimeStamp()
+
         if comm_rank != 0:
-            return
+            return ts
 
         save_loc = f"{self.config['icgen_work_dir']}/particle_load_info.hdf5"
         m_to_msun = self.sim_box['mass_msun']
@@ -2045,7 +2139,8 @@ class ParticleLoad:
             ds.attrs.create('Description', descr_m_msun)
 
             if not self.config['is_zoom']:
-                return
+                ts.set_time('Save metadata')
+                return ts
 
             g = f.create_group('ZoneII')
             ds = g.create_dataset(
@@ -2072,8 +2167,10 @@ class ParticleLoad:
             ds.attrs.create('Description', descr_m_msun)
             ds.attrs.create('LeapMass', self.scube['leap_mass'])
 
+        ts.set_time('Save metadata')
         print(f"Saved particle load metadata to '{save_loc}'.")
-
+        return ts
+        
     # ------------- Routines for generating IC_Gen info -------------------
 
     def create_param_and_submit_files(
@@ -2302,7 +2399,7 @@ class ParticleLoad:
 
         return max_parts, max_fft
 
-    def compute_softenings(self, verbose=False) -> dict:
+    def compute_softenings(self, verbose=True) -> dict:
         """
         Compute softening lengths, in units of Mpc.
 
@@ -2885,16 +2982,22 @@ def centre_of_mass_mpi(coords, masses):
         other ranks, the return value is not significant.
 
     """
+    ts = TimeStamp()
     # Form local CoM first, to avoid memory overheads...
     com_local = np.average(coords, weights=masses, axis=0)
+    ts.set_time('Local average')
     m_tot = np.sum(masses)
-
+    ts.set_time('Local sum')
+    
     # ... then form cross-MPI (weighted) average of all local CoMs.
     com_x = comm.reduce(com_local[0] * m_tot)
     com_y = comm.reduce(com_local[1] * m_tot)
     com_z = comm.reduce(com_local[2] * m_tot)
     m_tot = comm.reduce(m_tot)
-
+    ts.set_time('MPI')
+    if comm_rank == 0:
+        ts.print_time_usage('Finished centre_of_mass_mpi')
+    
     return np.array((com_x, com_y, com_z)) / m_tot
 
 
