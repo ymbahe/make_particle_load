@@ -7,6 +7,12 @@ import h5py as h5
 import yaml
 from shutil import copy
 from tools.param_file_routines import make_custom_copy
+from local import local
+
+from pdb import set_trace
+
+
+# TODO: update N_Part_Equiv to reflect DM particles only when in dual mode.
 
 def main():
     """Set up SWIFT run."""
@@ -16,7 +22,7 @@ def main():
     ic_metadata = get_ic_metadata(args.ics_file)
 
     # Add additional required parameters
-    params = compile_params(ic_metadata)
+    params = compile_params(ic_metadata, args)
     
     # Set up run directory
     set_up_rundir(args)
@@ -107,7 +113,10 @@ def parse_arguments():
             args.param_template = './swift_templates/params_eagle.yml'
     if args.sim_name is None:
         args.sim_name = args.ics_file.replace('.hdf5', '')
-            
+    if args.run_time < 0.5:
+        print(f"Overriding input run time to 0.6 hours.")
+        args.run_time = 0.6
+        
     return args
 
 
@@ -154,12 +163,12 @@ def compile_params(ic_data, args):
         params[key] = ic_data[key]
 
     params['slurm_num_nodes'] = args.num_nodes
-    params['slurm_ntasks_per_node'] = 1 if args.num_nodes = 1 else 2
+    params['slurm_ntasks_per_node'] = 1 if args.num_nodes == 1 else 2
     params['sim_name'] = args.sim_name
-    params['slurm_partition'] = SLURM_PARTITION
-    params['slurm_account'] = SLURM_ACCOUNT
-    params['slurm_email'] = SLURM_EMAIL
-    params['slurm_time_string'] = get_time_string(args.max_run_time)
+    params['slurm_partition'] = local['slurm_partition']
+    params['slurm_account'] = local['slurm_account']
+    params['slurm_email'] = local['slurm_email']
+    params['slurm_time_string'] = get_time_string(args.run_time)
 
     params['module_setup_command'] = (
         '' if args.module_file is None else f'source {args.module_file}')
@@ -182,6 +191,7 @@ def compile_params(ic_data, args):
     else:
        params['swift_extra_flags'] = ''
 
+    return params
         
 def set_up_rundir(args):
     """Set up the base directory for the SWIFT run."""
@@ -190,9 +200,11 @@ def set_up_rundir(args):
         os.makedirs(run_dir)
 
     copy(args.output_time_file, f"{run_dir}/snapshot_times.txt")
+    if not os.path.isdir(run_dir + '/logs'):
+        os.makedirs(run_dir + '/logs')
 
-
-def generate_params(data, args):
+    
+def generate_param_file(data, args):
     """Adapt and write the SWIFT parameter file."""
     base_file = args.param_template
     params = yaml.safe_load(open(base_file))
@@ -200,11 +212,11 @@ def generate_params(data, args):
 
     # Now adjust all the required parameters...
     cosmo = params['Cosmology']
-    cosmo['h'] = data['HubbleParam']
-    cosmo['a_begin'] = data['AExp_ICs']
-    cosmo['Omega_cdm'] = data['OmegaDM']
-    cosmo['Omega_lambda'] = 1.0 - data['Omega0']
-    cosmo['Omega_b'] = data['OmegaBaryon']
+    cosmo['h'] = float(data['HubbleParam'])
+    cosmo['a_begin'] = float(data['AExp_ICs'])
+    cosmo['Omega_cdm'] = float(data['OmegaDM'])
+    cosmo['Omega_lambda'] = float(data['OmegaLambda'])
+    cosmo['Omega_b'] = float(data['OmegaBaryon'])
 
     params['Scheduler']['max_top_level_cells'] = compute_top_level_cells()
 
@@ -212,13 +224,13 @@ def generate_params(data, args):
     if args.vr:
         params['Snapshots']['invoke_stf'] = 1
 
-    params['Restarts']['max_run_time'] = max(args.max_run_time - 0.5)
+    params['Restarts']['max_run_time'] = args.run_time - 0.5
 
     gravity = params['Gravity']
-    mean_ips = data['BoxSize'] / data['N_DM_equiv']
+    mean_ips = data['BoxSize'] / data['N_Part_Equiv']
 
-    gravity['comoving_DM_softening'] = mean_ips * (1/20)
-    gravity['max_physical_DM_softening'] = mean_ips * (1/50)
+    gravity['comoving_DM_softening'] = float(mean_ips) * (1/20)
+    gravity['max_physical_DM_softening'] = float(mean_ips) * (1/50)
     gravity['mesh_side_length'] = compute_mesh_side_length()
     if is_hydro:
         fac = data['dm_to_baryon_mass_ratio']**(-1/3)
@@ -241,12 +253,13 @@ def generate_submit_scripts(data, args):
     """Adapt and write the SLURM submit scripts."""
     
     submit_file = f"{args.run_dir}/submit.sh"
-    submit_file = f"{args.run_dir}/submit.sh"
-
-    make_custom_copy(args.slurm_template, data, submit_file, executable=True)
-    data['swift_flags'].append(' --restart')
-    make_custom_copy(args.slurm_template, data, resubmit_file, executable=True)
-
+    resubmit_file = f"{args.run_dir}/resubmit.sh"
+    
+    make_custom_copy(args.slurm_template, submit_file, data, executable=True)
+    data['swift_flags'] += ' --restart'
+    make_custom_copy(args.slurm_template, resubmit_file, data, executable=True)
+    copy('./swift_templates/auto_resubmit', args.run_dir)
+        
 
 def compute_top_level_cells():
     """Compute the optimal number of top-level cells per dimension."""
@@ -264,6 +277,18 @@ def set_default(dictionary, key, value):
     if key not in dictionary:
         dictionary[key] = value
 
+
+def get_time_string(time):
+    int_hrs = int(np.floor(time))
+
+    mins = (time - int_hrs) * 60
+    int_mins = int(np.floor(mins))
+
+    secs = (mins - int_mins) * 60
+    int_secs = int(np.floor(secs))
+
+    return f'{int_hrs:02d}:{int_mins:02d}:{int_secs:02d}'
+    
 
 if __name__ == "__main__":
     main()
