@@ -3,7 +3,7 @@
 import numpy as np
 import argparse
 import os
-import h5py
+import h5py as h5
 import yaml
 from shutil import copy
 from tools.param_file_routines import make_custom_copy
@@ -12,17 +12,20 @@ def main():
 	"""Set up SWIFT run."""
 	args = parse_arguments()
 
-	# Extract required data from ICs file.
+    # Extract required data from ICs file.
 	ic_metadata = get_ic_metadata(args.ics_file)
 
+    # Add additional required parameters
+    params = compile_params(ic_metadata)
+    
 	# Set up run directory
 	set_up_rundir(args)
 
 	# Adapt and write simulation parameter file
-	generate_params(ic_metadata, args)
+	generate_param_file(params, args)
 
 	# Adapt (re-/)submit scripts
-	generate_submit_scripts(ic_metadata, args)
+	generate_submit_scripts(params, args)
 
 
 def parse_arguments():
@@ -43,10 +46,12 @@ def parse_arguments():
     )
 
     parser.add_argument(
-    	'-v', '--vr_dir',
-    	help='Directory in which Velociraptor library is stored. If not '
-    	     'given, on-the-fly VR will not be run.'
+        '-s', '--sim_name',
+        help='Name of the simulation. If not supplied, the name of the '
+             'ICs file will be used.'
     )
+    parser.add_argument(
+    	'-vr', action='store_true', help='Run with VR on the fly?')
     parser.add_argument(
     	'-t', '--sim_type', default='dmo',
     	help="Type of simulation to run: DMO [default] or EAGLE."
@@ -64,7 +69,7 @@ def parse_arguments():
         '-r', '--run_time', type=float, default=72,
         help="Job run time [hours]. SWIFT will stop half an hour earlier.")
     parser.add_argument(
-    	'-x', '--exec_dir', default='../../builds/std_vr'
+    	'-x', '--exec_dir', default='../../builds/std_vr',
     	help="Directory containing the SWIFT executable, either absolute or "
     	     "relative to run_dir (default: ../../builds/std_vr)."
     )
@@ -89,15 +94,20 @@ def parse_arguments():
     	raise ValueError("Must specify the run directory!")
     if args.sim_type is None:
     	raise ValueError("Must specify the simulation type!")
-
-	args.sim_type = args.sim_type.lower()
-
+    
+    args.sim_type = args.sim_type.lower()
+    if args.sim_type not in ['dmo', 'eagle']:
+        raise ValueError(
+            "Simulation type '{args.sim_type}' is not (yet) supported.")
+    
     if args.param_template is None:
     	if args.sim_type == 'dmo':
     		args.param_template = './swift_templates/params_dmo.yml'
     	elif args.sim_type == 'eagle':
     		args.param_template = './swift_templates/params_eagle.yml'
-
+    if args.sim_name is None:
+        args.sim_name = args.ics_file.replace('.hdf5', '')
+            
     return args
 
 
@@ -122,6 +132,57 @@ def get_ic_metadata(ics_file):
 	return data
 
 
+def compile_params(ic_data, args):
+    """
+    Compile the full param dict.
+
+    Parameters
+    ---------
+    ic_data : dict
+        Parameters read in from the ICs file.
+    args : obj
+        The input parameters.
+
+    Returns
+    -------
+    params : dict
+        Dict containing all required parameters.
+
+    """
+    params = {}
+    for key in ic_data:
+        params[key] = ic_data[key]
+
+    params['slurm_num_nodes'] = args.num_nodes
+    params['slurm_ntasks_per_node'] = 1 if args.num_nodes = 1 else 2
+    params['sim_name'] = args.sim_name
+    params['slurm_partition'] = SLURM_PARTITION
+    params['slurm_account'] = SLURM_ACCOUNT
+    params['slurm_email'] = SLURM_EMAIL
+    params['slurm_time_string'] = get_time_string(args.max_run_time)
+
+    params['module_setup_command'] = (
+        '' if args.module_file is None else f'source {args.module_file}')
+
+    if args.num_nodes == 1:
+        params['slurm_mpi_command'] = ''
+        swift_exec = 'swift'
+    else:
+        params['slurm_mpi_command'] = f'mpirun -np $$SLURM_NTASKS'
+        swift_exec = 'swift_mpi'
+    params['swift_exec'] = args.exec_dir + '/' + swift_exec
+
+    if args.sim_type in ['dmo', 'sibelius']:
+        params['swift_flags'] = '--self-gravity'
+    elif args.sim_type == 'eagle':
+        params['swift_flags'] = '--eagle'
+
+    if args.sim_type == 'sibelius':
+        params['swift_extra_flags'] = '--fof params.yml'
+    else:
+       params['swift_extra_flags'] = ''
+
+        
 def set_up_rundir(args):
 	"""Set up the base directory for the SWIFT run."""
 	run_dir = args.run_dir
@@ -148,7 +209,7 @@ def generate_params(data, args):
 	params['Scheduler']['max_top_level_cells'] = compute_top_level_cells()
 
 	params['Snapshots']['output_list'] = 'snapshot_times.dat'
-	if args.vr_dir is not None:
+	if args.vr:
 		params['Snapshots']['invoke_stf'] = 1
 
 	params['Restarts']['max_run_time'] = max(args.max_run_time - 0.5)

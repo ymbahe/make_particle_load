@@ -91,11 +91,11 @@ class SwiftICs:
         pl_meta_file = args.pl_meta_file
         meta = {}
         with h5.File(pl_meta_file, 'r') as f:
-            att = f['Header'].attrs
-            meta['OmegaDM'] = att('OmegaDM')
-            meta['OmegaLambda'] = att('OmegaLambda')
-            meta['OmegaBaryon'] = att('OmegaBaryon')
-            meta['N_part_equiv'] = att('N_part_equiv')
+            h = f['Header']
+            meta['OmegaDM'] = h.attrs['OmegaDM']
+            meta['OmegaLambda'] = h.attrs['OmegaLambda']
+            meta['OmegaBaryon'] = h.attrs['OmegaBaryon']
+            meta['N_Part_Equiv'] = h.attrs['N_Part_Equiv']
 
         return meta
 
@@ -188,11 +188,14 @@ def parse_arguments():
     """Parse the command-line arguments."""
 
     parser = argparse.ArgumentParser(
-        description="Blabla."
+        description="Convert partial ICs files from IC_Gen "
+                    "into a single SWIFT compatible file."
     )
-    
     parser.add_argument(
-        'input_file_name',
+        'workdir', help='Working directory for the IC generation.')
+
+    parser.add_argument(
+        '-f', '--input_file_name',
         help="The name of one of the IC files from IC_Gen."
     )
     parser.add_argument(
@@ -204,19 +207,23 @@ def parse_arguments():
         help="Isolate gas particles in ICs?")
     parser.add_argument(
         '-m', '--pl_meta_file', default=None,
-        help="Particle load metadata file, to isolate gas particles."
+        help="Particle load metadata file, to isolate gas particles. "
+             "By default, this is `particle_load_info.hdf5' in workdir."
     )
 
     args = parser.parse_args()
 
+    if args.input_file_name is None:
+        sim_name = args.workdir.split('/')[-1]
+        args.input_file_name = args.workdir + '/ICs/' + sim_name + '.0.hdf5'
+    if args.pl_meta_file is None:
+        args.pl_meta_file = args.workdir + "/particle_load_info.hdf5"
+        
     # Some sanity checks
-    if args.isolate_gas:
-        if args.pl_meta_file is None:
-            raise ValueError(
-                "Must specify the PL metadata file to isolate gas particles!")
-        if not os.path.isfile(args.pl_meta_file):
-            raise OSError(
-                f"Cannot find the PL metadata file {args.pl_meta_file}!")
+    if not os.path.isfile(args.pl_meta_file):
+        raise OSError("Could not find PL metadata file {args.pl_meta_file}!")
+    if not os.path.isfile(args.input_file_name):
+        raise OSError("Could not find input ICs file {args.input_file_name}!")
 
     return args
 
