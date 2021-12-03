@@ -279,6 +279,7 @@ class ParticleLoad:
             # System-specific parameters
             'slurm_partition': None,
             'slurm_account': None,
+            'slurm_email': None,
             'memory_per_core': 18.2e9,
             'num_cores_per_node': 28,
         }
@@ -1831,10 +1832,14 @@ class ParticleLoad:
 
         num_files_per_rank = self.find_fortran_file_split()
         num_files_all = num_files_per_rank * comm_size
-        separation_indices = np.linspace(
-            0, self.parts['m'].shape[0], num=num_files_per_rank+1,
-            dtype=int, endpoint=True
-        )
+
+        # Split particles over files.
+        # N.B.: IC_Gen expects equal particle numbers except in last file.
+        num_parts_local = self.parts['m'].shape[0]
+        num_parts_per_file = num_parts_local // num_files_per_rank
+        separation_indices = np.arange(
+            0, num_parts_local + 1, num_parts_per_file)
+        separation_indices[-1] = num_parts_local
 
         # Make sure to save no more than max_save files at a time.
         max_save = 50
@@ -2483,6 +2488,7 @@ class ParticleLoad:
                 f"source {extra_params['swift_module_setup']}")
         param_dict['slurm_partition'] = extra_params['slurm_partition']
         param_dict['slurm_account'] = extra_params['slurm_account']
+        param_dict['slurm_email'] = extra_params['slurm_email']
         param_dict['num_cores_per_node'] = extra_params['num_cores_per_node']
 
         return param_dict       

@@ -7,6 +7,8 @@
 #SBATCH --account=$slurm_account
 #SBATCH --exclusive
 #SBATCH --time=$icgen_runtime_hours:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=$slurm_email
 
 $icgen_module_setup
 

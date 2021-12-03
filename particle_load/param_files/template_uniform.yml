@@ -54,5 +54,6 @@ swift_module_setup:    ~/.module_load_swift   # [REQUIRED] File to source in ord
 # PARAMETERS FOR TARGET SYSTEM #
 slurm_partition:        partition      # [REQUIRED] Name of the partition to use for SLURM job sumbission.
 slurm_account:          account        # [REQUIRED] Name of the account to use for SLURM job submission.
+slurm_email:            email          # [REQUIRED] Email address to use for SLURM job notifications.
 memory_per_core:        18.2e9         # [REQUIRED] Available memory per core on the system [GB].
 num_cores_per_node:     28             # [REQUIRED] Number of cores per node.
