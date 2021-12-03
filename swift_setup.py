@@ -75,7 +75,7 @@ def parse_arguments():
         '-r', '--run_time', type=float, default=72,
         help="Job run time [hours]. SWIFT will stop half an hour earlier.")
     parser.add_argument(
-        '-x', '--exec_dir', default='../../builds/std_vr',
+        '-x', '--exec_dir', default='../../swiftsim/builds/std_vr',
         help="Directory containing the SWIFT executable, either absolute or "
              "relative to run_dir (default: ../../builds/std_vr)."
     )
@@ -112,7 +112,7 @@ def parse_arguments():
         elif args.sim_type == 'eagle':
             args.param_template = './swift_templates/params_eagle.yml'
     if args.sim_name is None:
-        args.sim_name = args.ics_file.replace('.hdf5', '')
+        args.sim_name = args.ics_file.split('/')[-1].replace('.hdf5', '')
     if args.run_time < 0.5:
         print(f"Overriding input run time to 0.6 hours.")
         args.run_time = 0.6
@@ -169,16 +169,18 @@ def compile_params(ic_data, args):
     params['slurm_account'] = local['slurm_account']
     params['slurm_email'] = local['slurm_email']
     params['slurm_time_string'] = get_time_string(args.run_time)
-
+    
     params['module_setup_command'] = (
         '' if args.module_file is None else f'source {args.module_file}')
 
     if args.num_nodes == 1:
         params['slurm_mpi_command'] = ''
         swift_exec = 'swift'
+        params['threads_per_task'] = local['cpus_per_node']
     else:
         params['slurm_mpi_command'] = f'mpirun -np $$SLURM_NTASKS'
         swift_exec = 'swift_mpi'
+        params['threads_per_task'] = int(local['cpus_per_node'] / 2)
     params['swift_exec'] = args.exec_dir + '/' + swift_exec
 
     if args.sim_type in ['dmo', 'sibelius']:
@@ -199,7 +201,7 @@ def set_up_rundir(args):
     if not os.path.isdir(run_dir):
         os.makedirs(run_dir)
 
-    copy(args.output_time_file, f"{run_dir}/snapshot_times.txt")
+    copy(args.output_time_file, f"{run_dir}/output_times.dat")
     if not os.path.isdir(run_dir + '/logs'):
         os.makedirs(run_dir + '/logs')
 
@@ -220,10 +222,11 @@ def generate_param_file(data, args):
 
     params['Scheduler']['max_top_level_cells'] = compute_top_level_cells()
 
-    params['Snapshots']['output_list'] = 'snapshot_times.dat'
+    params['Snapshots']['output_list'] = 'output_times.dat'
     if args.vr:
         params['Snapshots']['invoke_stf'] = 1
-
+        params['swift_flags'] += ' --velociraptor'
+        
     params['Restarts']['max_run_time'] = args.run_time - 0.5
 
     gravity = params['Gravity']
@@ -264,7 +267,7 @@ def generate_submit_scripts(data, args):
 def compute_top_level_cells():
     """Compute the optimal number of top-level cells per dimension."""
     # Place holder for now...
-    return 200
+    return 10
 
 
 def compute_mesh_side_length():
