@@ -45,6 +45,7 @@ z_initial:              127.0          # [REQUIRED] Redshift to generate ICs at 
 panphasian_descriptor:   "[Panph1,L16,(31250,23438,39063),S12,CH1050187043,EAGLE_L0100_VOL1]"      # [REQUIRED] String encoding the phases to use for the ICs from the Panphasia field.
 icgen_exec:               ../../IC_Gen.x    # [REQUIRED] Location of IC_Gen executable (absolute or relative to icgen_work_dir).
 icgen_powerspec_dir:      ../..      # [REQUIRED] Directory containing the power spectrum file (absolute or relative to icgen_work_dir).
+icgen_power_spectrum_file: None       # Name of the power spectrum file to use if not the default one for the chosen cosmology. USE WITH CARE!
 icgen_module_setup:       ~/.module_load_icgen   # [REQUIRED] File to source in order to set up the correct environment for IC_Gen (None to not source anything). 
 icgen_num_species:        1           # Number of DM particle species that IC_Gen should generate. Default is 1 for uniform-volume sims, 2 for zooms (this is independent of gas generation).
 icgen_fft_to_gcube_ratio: 1.0         # Side length of FFT mesh in units of the gcube side length (default: 1).

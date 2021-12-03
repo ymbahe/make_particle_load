@@ -131,6 +131,11 @@ class ParticleLoad:
         self.config = self.get_config_params(params)
         self.extra_params = self.get_extra_params(params)        
 
+        # Override power spectrum file if desired
+        if self.extra_params['icgen_power_spectrum_file'] is not None:
+            self.cosmo['linear_powerspectrum_file'] = (
+                self.extra_params['icgen_power_spectrum_file'])
+        
     def get_config_params(self, params):
         """
         Get parameters that affect the particle load generation.
@@ -240,6 +245,7 @@ class ParticleLoad:
             'icgen_nmaxpart': 36045928,
             'icgen_nmaxdisp': 791048437,
             'icgen_runtime_hours': 4,
+            'icgen_power_spectrum_file': None,
             'icgen_use_PH_IDs': True,
             'icgen_PH_nbit': 21,
             'fft_min_Nyquist_factor': 2.0,
@@ -1824,6 +1830,7 @@ class ParticleLoad:
                 os.makedirs(save_dir_bin)
 
         num_files_per_rank = self.find_fortran_file_split()
+        num_files_all = num_files_per_rank * comm_size
         separation_indices = np.linspace(
             0, self.parts['m'].shape[0], num=num_files_per_rank+1,
             dtype=int, endpoint=True
@@ -1845,7 +1852,9 @@ class ParticleLoad:
                         start_index = separation_indices[iifile]
                         end_index = separation_indices[iifile+1]
                         self.save_local_particles_as_binary(
-                            ifile, fortran_loc, start_index, end_index)
+                            ifile, num_files_all, fortran_loc,
+                            start_index, end_index
+                        )
 
                 if self.verbose:
                     print(
@@ -1951,7 +1960,7 @@ class ParticleLoad:
             print(f"Done saving local particles to '{save_loc}'.")
 
     def save_local_particles_as_binary(
-        self, index, save_loc, start=None, end=None):
+        self, index, num_files, save_loc, start=None, end=None):
         """
         Write (part of) local particle load to Fortran binary file `save_loc`.
 
@@ -1974,12 +1983,14 @@ class ParticleLoad:
         num_in_file = end - start
         f = FortranFile(save_loc, mode="w")
 
+        print(index, num_files, save_loc, start, end, num_in_file)
+        
         # Write first 4+8+4+4+4 = 24 bytes
         f.write_record(
             np.int32(num_in_file),
             np.int64(self.nparts['tot_all']),
             np.int32(index),        # Index of this file
-            np.int32(comm_size),    # Total number of files
+            np.int32(num_files),    # Total number of files
             np.int32(0),
             
             # Now we pad the header with 6 zeros to make the header length
