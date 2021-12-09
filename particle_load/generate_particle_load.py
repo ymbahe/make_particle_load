@@ -31,7 +31,6 @@ comm_size = comm.Get_size()
 rng = np.random.default_rng()
 
 # ** TO DO **
-# - Change internal units from h^-1 Mpc to Mpc, *only* add h^-1 for IC-Gen.
 # - Tidy up output
 
 class ParticleLoad:
@@ -196,6 +195,9 @@ class ParticleLoad:
             cparams['icgen_work_dir'] = (
                 f"{cparams['icgen_object_dir']}/{params['sim_name']}")
 
+        set_none(cparams, 'dm_to_gas_number_ratio')
+        set_none(cparams, 'dm_to_gas_mass_ratio')
+            
         # If an object directory is specified and has the specified mask file,
         # use that
         if (cparams['icgen_object_dir'] is not None and
@@ -240,7 +242,7 @@ class ParticleLoad:
             'icgen_exec': None,
             'icgen_powerspec_dir': None,
             'icgen_module_setup': None,
-            'icgen_num_species': 1,
+            'icgen_num_species': None,
             'icgen_fft_to_gcube_ratio': 1.0,
             'icgen_nmaxpart': 36045928,
             'icgen_nmaxdisp': 791048437,
@@ -1860,7 +1862,7 @@ class ParticleLoad:
                             ifile, num_files_all, fortran_loc,
                             start_index, end_index
                         )
-
+                        
                 if self.verbose:
                     print(
                         f"[Rank {comm_rank}] Finished saving "
@@ -2012,7 +2014,7 @@ class ParticleLoad:
         f.write_record(self.parts['pos'][start:end, 0].astype(np.float64))
         f.write_record(self.parts['pos'][start:end, 1].astype(np.float64))
         f.write_record(self.parts['pos'][start:end, 2].astype(np.float64))
-        f.write_record(self.parts['m'].astype("float32"))
+        f.write_record(self.parts['m'][start:end].astype("float32"))
         f.close()
 
         if comm_rank == 0:
@@ -2942,6 +2944,15 @@ def get_cosmology_params(name):
 
     return cosmo
 
+
+def set_none(in_dict, key):
+    """Set a dict entry to None if it has the string 'None'"""
+    if key not in in_dict:
+        return
+    if isinstance(in_dict[key], str):
+        if in_dict[key].lower() == 'none':
+            in_dict[key] = None
+            
 
 if __name__ == '__main__':
     only_calc_ntot = False
