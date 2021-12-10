@@ -1,9 +1,0 @@
-Default:
-  Standard_DM: on
-  Softenings_DMBackground: off
-  Softenings_DM: off
-
-Snipshot:
-  Standard_DM: off
-  Coordinates_DM: on
-  ParticleIDs_DM: on
