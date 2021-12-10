@@ -19,12 +19,12 @@ from pdb import set_trace
 # Load utilities from `modules` directory
 # ---------------------------------------
 
-# Append modules directory to PYTHONPATH
+# Append tools directory to PYTHONPATH
 sys.path.append(
     os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         os.pardir,
-        "swift_scripts"
+        "tools"
     )
 )
 
