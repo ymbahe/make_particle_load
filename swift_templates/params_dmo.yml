@@ -1,3 +1,7 @@
+# Define some meta-data about the simulation
+MetaData:
+  run_name:   SWIFT_DMO_Simulation
+
 # Define the system of units to use internally. 
 InternalUnitSystem:
   UnitMass_in_cgs:     1.98841e43    # 10^10 M_sun
@@ -21,7 +25,7 @@ TimeIntegration:
   dt_max:     0.01
 
 Scheduler:
-  max_top_level_cells: 200
+  max_top_level_cells: 10
   cell_split_size:     200
 
 # Parameters governing the snapshots
@@ -55,7 +59,7 @@ Restarts:
 Gravity:
   eta:                              0.025         
   comoving_DM_softening:            -1
-  softening_ratio_background:       0.02
+  softening_ratio_background:       0.05
   max_physical_DM_softening:        -1
   mesh_side_length:                 256
   MAC:                              adaptive
@@ -70,6 +74,7 @@ InitialConditions:
   periodic:                    1
   cleanup_h_factors:           1
   cleanup_velocity_factors:    1
+  remap_ids:                   1
 
 StructureFinding:
   config_file_name:         vrconfig.cfg
