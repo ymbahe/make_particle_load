@@ -1,0 +1,25 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=$slurm_num_nodes
+#SBATCH --tasks-per-node=$slurm_ntasks_per_node
+#SBATCH -J SWI-$sim_name
+#SBATCH -o ./logs/swift.%J.out
+#SBATCH -e ./logs/swift.%J.err
+#SBATCH -p $slurm_partition
+#SBATCH -A $slurm_account
+#SBATCH --exclusive
+#SBATCH --time=$slurm_time_string
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=$slurm_email
+
+$module_setup_command
+
+$slurm_mpi_command $swift_exec \
+    -v 1 --pin --threads=$threads_per_task \
+    --cosmology \
+    $swift_flags \
+    params.yml \
+    $swift_extra_flags
+
+echo "Job done, info follows..."
+sacct -j $$SLURM_JOBID --format=JobID,JobName,Partition,AveRSS,MaxRSS,AveVMSize,MaxVMSize,Elapsed,ExitCode

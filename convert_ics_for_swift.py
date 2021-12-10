@@ -16,7 +16,7 @@ def main():
     swiftICs.isolate_gas(args)
     swiftICs.remap_ids(args)
     swiftICs.save(args)
-
+    
 class SwiftICs:
     """
     Generate and store the ICs for SWIFT.
@@ -26,9 +26,12 @@ class SwiftICs:
         if not os.path.isfile(in_file):
             raise OSError(f"Specified input file '{in_file}' not found!")
         self.header = self.load_header(in_file)
+        self.meta = self.load_meta_data(args)
         num_input_files = self.header['NumFilesPerSnapshot']
         self.num_parts = self.header['NumPart_Total']
 
+        print(f"Number of particles from IC-Gen:", self.num_parts)
+        
         self.pt1 = self.load_parts(in_file, num_input_files, 1)
         self.pt2 = self.load_parts(in_file, num_input_files, 2)
 
@@ -42,8 +45,6 @@ class SwiftICs:
                            'NumFilesPerSnapshot', 'NumPart_Total',
                            'NumPart_Total_HighWord','Time', 'HubbleParam']:
                     header[key] = g.attrs[key]
-
-        header['BoxSize'] /= header['HubbleParam']
 
         return header
 
@@ -80,26 +81,36 @@ class SwiftICs:
                 np.zeros(self.num_parts[ptype], dtype="float32")
                 + self.header['MassTable'][ptype]
             )
-        if 'Masses' in parts:
-            parts['Masses'] /= self.header['HubbleParam']
-        if 'Coordinates' in parts:
-            parts['Coordinates'] /= self.header['HubbleParam']
         return parts
+
+    def load_meta_data(self, args):
+        pl_meta_file = args.pl_meta_file
+        meta = {}
+        with h5.File(pl_meta_file, 'r') as f:
+            h = f['Header']
+            meta['Omega0'] = h.attrs['Omega0']
+            meta['OmegaDM'] = h.attrs['OmegaDM']
+            meta['OmegaLambda'] = h.attrs['OmegaLambda']
+            meta['OmegaBaryon'] = h.attrs['OmegaBaryon']
+            meta['N_Part_Equiv'] = h.attrs['N_Part_Equiv']
+
+        return meta
 
     def isolate_gas(self, args):
         """Isolate gas particles, if desired."""
         if not args.isolate_gas:
             return
 
+        print(f"Separating DM and gas particles...")
         h = self.header['HubbleParam']
         pt1 = self.pt1
 
         pl_meta_file = args.pl_meta_file
         with h5.File(pl_meta_file, 'r') as f:
-            mgas = f['ZoneI'].attrs['m_gas_msun'] / 1e10
-            mdm = f['ZoneI'].attrs['m_dm_msun'] / 1e10
-            mips = f['ZoneI'].attrs['MeanInterParticleSeparation_gas_Mpc']
-
+            mgas = f['ZoneI'].attrs['m_gas_msun'] / 1e10 * h
+            mdm = f['ZoneI'].attrs['m_dm_msun'] / 1e10 * h
+            mips = f['ZoneI'].attrs['MeanInterParticleSeparation_gas_Mpc'] * h
+            
         ind_gas = np.nonzero(
             np.abs(pt1['Masses'] - mgas) / mgas < 1e-4)[0]
         ind_dm = np.nonzero(
@@ -108,6 +119,12 @@ class SwiftICs:
         n_gas = len(ind_gas)
         n_dm = len(ind_dm)
 
+        print(f"Found {n_dm} DM and {n_gas} gas particles "
+              f"(ratio: {n_dm/n_gas:.3f}).\n"
+              f"   m_dm = {mdm * 1e10 / h:.2e} M_Sun, "
+              f"m_gas = {mgas * 1e10 / h:.2e} M_Sun."
+        )
+        
         if n_gas + n_dm != self.num_parts[1]:
             raise ValueError(
                 f"Have {self.num_parts[1]} Type1 particles in ICs, but "
@@ -126,7 +143,9 @@ class SwiftICs:
         pt0['SmoothingLength'] = np.zeros(n_gas) + mips
 
         self.pt0 = pt0
-
+        self.meta['m_gas'] = mgas / h
+        self.meta['m_dm'] = mdm / h
+                
     def remap_ids(self, args):
         pass
 
@@ -134,16 +153,19 @@ class SwiftICs:
         """Write the data to a SWIFT-compatible single file."""
 
         out_file = args.output_file_name
+        out_dir = args.repo_dir
         if out_file is None:
             out_file = args.input_file_name
             out_file_parts = out_file.split('.')
             out_file = '.'.join(out_file_parts[:-2]) + '.hdf5'
-
+        if out_dir is not None:
+            out_file_name = out_file.split('/')[-1]
+            out_file = out_dir + '/' + out_file_name
+            
         print(f"Writing output to {out_file}...")
 
         with h5.File(out_file, 'w') as f:
 
-            # Header. MUST CHECK WHETHER NAMES MUST BE CHANGED!
             self.header['NumFilesPerSnapshot'] = 1
             self.header['NumPart_ThisFile'] = self.num_parts
             self.header['NumPart_Total'] = self.num_parts
@@ -166,16 +188,28 @@ class SwiftICs:
                 for key in self.pt2:
                     pt2[key] = self.pt2[key]
 
+            # Bake in metadata for simulation setup
+            m = f.create_group('Metadata')
+            for key in self.meta:
+                m.attrs[key] = self.meta[key]
 
+            
 def parse_arguments():
     """Parse the command-line arguments."""
 
     parser = argparse.ArgumentParser(
-        description="Blabla."
+        description="Convert partial ICs files from IC_Gen "
+                    "into a single SWIFT compatible file."
     )
-    
     parser.add_argument(
-        'input_file_name',
+        'workdir', help='Working directory for the IC generation.')
+
+    parser.add_argument(
+        '-r', '--repo_dir',
+        help='[Optional] Directory in which to write output.'
+    )
+    parser.add_argument(
+        '-f', '--input_file_name',
         help="The name of one of the IC files from IC_Gen."
     )
     parser.add_argument(
@@ -187,19 +221,23 @@ def parse_arguments():
         help="Isolate gas particles in ICs?")
     parser.add_argument(
         '-m', '--pl_meta_file', default=None,
-        help="Particle load metadata file, to isolate gas particles."
+        help="Particle load metadata file, to isolate gas particles. "
+             "By default, this is `particle_load_info.hdf5' in workdir."
     )
 
     args = parser.parse_args()
 
+    if args.input_file_name is None:
+        sim_name = args.workdir.split('/')[-1]
+        args.input_file_name = args.workdir + '/ICs/' + sim_name + '.0.hdf5'
+    if args.pl_meta_file is None:
+        args.pl_meta_file = args.workdir + "/particle_load_info.hdf5"
+        
     # Some sanity checks
-    if args.isolate_gas:
-        if args.pl_meta_file is None:
-            raise ValueError(
-                "Must specify the PL metadata file to isolate gas particles!")
-        if not os.path.isfile(args.pl_meta_file):
-            raise OSError(
-                f"Cannot find the PL metadata file {args.pl_meta_file}!")
+    if not os.path.isfile(args.pl_meta_file):
+        raise OSError(f"Could not find PL metadata file {args.pl_meta_file}!")
+    if not os.path.isfile(args.input_file_name):
+        raise OSError(f"Could not find input ICs file {args.input_file_name}!")
 
     return args
 

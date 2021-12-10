@@ -10,11 +10,20 @@ from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
 from mpi4py import MPI
 import parallel_functions as pf
-import param_file_routines as pr
 from scipy.io import FortranFile
 import time
 
-import numpy as np
+# Append modules directory to PYTHONPATH
+sys.path.append(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir,
+        "tools"
+    )
+)
+
+import param_file_routines as pr
+
 import pyximport
 pyximport.install(
     setup_args={"include_dirs":np.get_include()},
@@ -153,6 +162,11 @@ class ParticleLoad:
         self.config = self.get_config_params(params)
         self.extra_params = self.get_extra_params(params)        
 
+        # Override power spectrum file if desired
+        if self.extra_params['icgen_power_spectrum_file'] is not None:
+            self.cosmo['linear_powerspectrum_file'] = (
+                self.extra_params['icgen_power_spectrum_file'])
+        
     def get_config_params(self, params):
         """
         Get parameters that affect the particle load generation.
@@ -213,6 +227,9 @@ class ParticleLoad:
             cparams['icgen_work_dir'] = (
                 f"{cparams['icgen_object_dir']}/{params['sim_name']}")
 
+        set_none(cparams, 'dm_to_gas_number_ratio')
+        set_none(cparams, 'dm_to_gas_mass_ratio')
+            
         # If an object directory is specified and has the specified mask file,
         # use that
         if (cparams['icgen_object_dir'] is not None and
@@ -257,11 +274,12 @@ class ParticleLoad:
             'icgen_exec': None,
             'icgen_powerspec_dir': None,
             'icgen_module_setup': None,
-            'icgen_num_species': 1,
+            'icgen_num_species': None,
             'icgen_fft_to_gcube_ratio': 1.0,
             'icgen_nmaxpart': 36045928,
             'icgen_nmaxdisp': 791048437,
             'icgen_runtime_hours': 4,
+            'icgen_power_spectrum_file': None,
             'icgen_use_PH_IDs': True,
             'icgen_PH_nbit': 21,
             'fft_min_Nyquist_factor': 2.0,
@@ -1895,10 +1913,14 @@ class ParticleLoad:
         # Split local particle load into appropriate number of files
         num_files_per_rank = self.find_fortran_file_split()
         num_files_all = num_files_per_rank * comm_size
-        separation_indices = np.linspace(
-            0, self.parts['m'].shape[0], num=num_files_per_rank+1,
-            endpoint=True, dtype=int
-        )
+        
+        # Split particles over files.
+        # N.B.: IC_Gen expects equal particle numbers except in last file.
+        num_parts_local = self.parts['m'].shape[0]
+        num_parts_per_file = num_parts_local // num_files_per_rank
+        separation_indices = np.arange(
+            0, num_parts_local + 1, num_parts_per_file)
+        separation_indices[-1] = num_parts_local
 
         ts.set_time('Prepare saving')
         
@@ -2087,7 +2109,7 @@ class ParticleLoad:
         f.write_record(self.parts['pos'][start:end, 0].astype(np.float64))
         f.write_record(self.parts['pos'][start:end, 1].astype(np.float64))
         f.write_record(self.parts['pos'][start:end, 2].astype(np.float64))
-        f.write_record(self.parts['m'].astype("float32"))
+        f.write_record(self.parts['m'][start:end].astype("float32"))
         f.close()
 
         if comm_rank == 0:
@@ -2120,6 +2142,9 @@ class ParticleLoad:
             g.attrs.create('SimulationMass_MSun', self.sim_box['mass_msun'])
             g.attrs.create('NumPart_Equiv', self.sim_box['num_part_equiv'])
             g.attrs.create('N_Part_Equiv', self.sim_box['n_part_equiv'])
+
+            for key in self.cosmo:
+                g.attrs[key] = self.cosmo[key]
 
             g = f.create_group('ZoneI')
             g.attrs['m_gas'] = self.gcell_info['zone1_m_gas']
@@ -3025,6 +3050,15 @@ def get_cosmology_params(name):
 
     return cosmo
 
+
+def set_none(in_dict, key):
+    """Set a dict entry to None if it has the string 'None'"""
+    if key not in in_dict:
+        return
+    if isinstance(in_dict[key], str):
+        if in_dict[key].lower() == 'none':
+            in_dict[key] = None
+            
 
 if __name__ == '__main__':
     only_calc_ntot = False

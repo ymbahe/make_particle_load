@@ -1,3 +1,7 @@
+# Define some meta-data about the simulation
+MetaData:
+  run_name:   SWIFT_DMO_Simulation
+
 # Define the system of units to use internally. 
 InternalUnitSystem:
   UnitMass_in_cgs:     1.98841e43    # 10^10 M_sun
@@ -8,12 +12,12 @@ InternalUnitSystem:
 
 # Planck-13 cosmology
 Cosmology:
-  h:              $cosmo_hubbleParam
-  a_begin:        $sim_aexp_initial
-  a_end:          $sim_aexp_final
-  Omega_m:        $cosmo_Omega0
-  Omega_lambda:   $cosmo_OmegaLambda
-  Omega_b:        $cosmo_OmegaBaryon
+  h:              -1
+  a_begin:        -1
+  a_end:          1.0
+  Omega_cdm:      -1
+  Omega_lambda:   -1
+  Omega_b:        -1
     
 # Parameters governing the time integration
 TimeIntegration:
@@ -21,17 +25,15 @@ TimeIntegration:
   dt_max:     0.01
 
 Scheduler:
-  max_top_level_cells: 32
+  max_top_level_cells: 10
   cell_split_size:     200
 
 # Parameters governing the snapshots
 Snapshots:
-  basename:            $sim_name
-  delta_time:          1.02
-  scale_factor_first:  0.02
+  basename:            snapshot
   output_list_on:      1
   output_list:         ./snapshot_times.txt
-  invoke_stf:          0
+  invoke_stf:          1
   compression:         9
   subdir:              snapshots 
 
@@ -47,7 +49,7 @@ Restarts:
   onexit:             1
   subdir:             restart    # Sub-directory of the directory where SWIFT is run
   basename:           swift
-  delta_hours:        4.0
+  delta_hours:        2.0
   stop_steps:         100
   max_run_time:       71.5       # In hours
   resubmit_on_exit:   1
@@ -56,25 +58,26 @@ Restarts:
 # Parameters for the self-gravity scheme
 Gravity:
   eta:                              0.025         
-  comoving_DM_softening:            $sim_eps_dm_mpc
-  softening_ratio_background:       $sim_eps_to_mips_background
-  max_physical_DM_softening:        $sim_eps_dm_pmpc
-  mesh_side_length:                 512
+  comoving_DM_softening:            -1
+  softening_ratio_background:       0.05
+  max_physical_DM_softening:        -1
+  mesh_side_length:                 256
   MAC:                              adaptive
   theta_cr:                         0.7
   epsilon_fmm:                      0.001
   allow_truncation_in_MAC:          1
-  use_tree_below_softening:         1
+  use_tree_below_softening:         0
 
 # Parameters related to the initial conditions
 InitialConditions:
-  file_name:                   $swift_ics_dir/$sim_name.hdf5
+  file_name:                   None
   periodic:                    1
-  cleanup_h_factors:           1    
-  cleanup_velocity_factors:    1  
+  cleanup_h_factors:           1
+  cleanup_velocity_factors:    1
+  remap_ids:                   1
 
 StructureFinding:
-  config_file_name:         none
+  config_file_name:         vrconfig.cfg
   basename:                 stf
   output_list_on:           0
   output_list:              list.txt
