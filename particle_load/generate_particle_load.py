@@ -10,11 +10,20 @@ from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
 from mpi4py import MPI
 import parallel_functions as pf
-import param_file_routines as pr
 from scipy.io import FortranFile
 import time
 
-import numpy as np
+# Append modules directory to PYTHONPATH
+sys.path.append(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir,
+        "tools"
+    )
+)
+
+import param_file_routines as pr
+
 import pyximport
 pyximport.install(
     setup_args={"include_dirs":np.get_include()},
