@@ -15,7 +15,7 @@
 $module_setup_command
 
 $slurm_mpi_command $swift_exec \
-    -v 1 --pin --threads=$$SLURM_CPUS_PER_TASK \
+    -v 1 --pin --threads=$threads_per_task \
     --cosmology \
     $swift_flags \
     params.yml \
