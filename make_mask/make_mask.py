@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpi4py import MPI
 
+from pdb import set_trace
 
 # ---------------------------------------
 # Load utilities from `modules` directory
@@ -173,7 +174,7 @@ class MakeMask:
                     ('group_number', 'a group number to select'),
                     ('vr_file',
                      'a Velociraptor catalogue to select groups from'),
-                    ('sort_rule', 'the method for halo sorting')
+                    ('sort_type', 'the method for halo sorting')
                     ]
                 for req in requirements:
                     if not req[0] in params:
@@ -193,7 +194,8 @@ class MakeMask:
                 # Set defaults for optional parameters
                 self.params['highres_radius_min'] = 0
                 self.params['highres_radius_buffer'] = 0
-
+                self.params['target_mass'] = None
+                
             else:
                 # Consistency checks for manual target region selection
                 if 'centre' not in params:
@@ -219,9 +221,13 @@ class MakeMask:
 
             # If desired, find the halo to center the high-resolution on
             if self.params['select_from_vr']:
-                self.params['centre'], self.params['radius'] = (
+                self.params['centre'], self.params['radius'], vr_index = (
                     self.find_highres_sphere())
-
+            self.params['fname'] = (
+                self.params['fname'].replace('$vr', f'{vr_index}'))
+            self.params['output_dir'] = (
+                self.params['output_dir'].replace('$vr', f'{vr_index}'))
+            
             # Convert coordinates and cuboid/slab dimensions to ndarray
             self.params['centre'] = np.array(self.params['centre'], dtype='f8')
             if 'dim' in self.params:
@@ -238,13 +244,13 @@ class MakeMask:
         # Broadcast the read and processed dict to all ranks.
         self.params = comm.bcast(self.params)
 
-    def find_highres_sphere(self) -> Tuple[np.ndarray, float]:
+    def find_highres_sphere(self) -> Tuple[np.ndarray, float, int]:
         """
         Determine the centre and radius of high-res sphere from Velociraptor.
 
         The selection is made based on the location of the halo in the
         catalogue, optionally after sorting them by M200c or M500c. This
-        is determined by the value of `self.params['sort_rule']`.
+        is determined by the value of `self.params['sort_type']`.
 
         This function is only executed by the root rank.
 
@@ -255,6 +261,8 @@ class MakeMask:
         radius : float
             The target radius of the high-res region, including any requested
             padding.
+        vr_index : int
+            The index of the VR halo.
 
         """
         # Make sure that we are on the root rank if over MPI
@@ -323,7 +331,7 @@ class MakeMask:
             f"- M_500crit: {m500_str}\n"
             )
 
-        return centre, r_highres
+        return centre, r_highres, vr_index
 
     def find_halo_index(self) -> int:
         """
@@ -351,30 +359,38 @@ class MakeMask:
             raise ValueError("find_halo_index() called on rank {comm_rank}!")
 
         # If the parameter file already specified the VR index, we are done
-        if self.params['sort_rule'].lower() == "none":
-            return self.params['group_number']
-
+        if self.params['sort_type'].lower() == "none":
+            return self.params['group_number']            
+        
         # ... otherwise, need to load the desired mass type of all (central)
         # VR haloes, sort them, and find the entry we want
         with h5py.File(self.params['vr_file'], 'r') as vr_file:
             structType = vr_file['/Structuretype'][:]
             field_halos = np.where(structType == 10)[0]
 
-            sort_rule = self.params['sort_rule'].lower()
-            if sort_rule == 'm200crit':
+            sort_type = self.params['sort_type'].lower()
+            if sort_type == 'm200crit':
                 m_halo = vr_file['/Mass_200crit'][field_halos]
-            elif sort_rule == 'm500crit':
+            elif sort_type == 'm500crit':
                 # If M500 cannot be loaded, an error will be raised
                 m_halo = vr_file['/SO_Mass_500_rhocrit'][field_halos]
             else:
-                raise ValueError("Unknown sorting rule '{sort_rule}'!")
+                raise ValueError("Unknown sorting rule '{sort_type}'!")
 
-        # Sort groups by specified mass, in descending order
-        sort_key = np.argsort(-m_halo)
-        halo_index = sort_key[self.params['group_number']]
+        # If we want to get close to a given value:
+        m_target = self.params['target_mass']
+        if m_target is not None:
+            m_target = float(m_target) / 1e10
+            halo_index = np.argmin(np.abs(m_halo - m_target))
+            
+        # ... else sort groups by specified mass, in descending order
+        else:
+            sort_key = np.argsort(-m_halo)
+            halo_index = sort_key[self.params['group_number']]
 
         # Store mass of target halo used for sorting, for later use
-        setattr(self, sort_rule, m_halo[halo_index])
+        setattr(self, sort_type, m_halo[halo_index])
+        set_trace()
         return halo_index
 
     def make_mask(self, padding_factor=2.0):
