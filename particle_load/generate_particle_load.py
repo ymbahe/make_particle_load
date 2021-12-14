@@ -122,7 +122,7 @@ class ParticleLoad:
             )
 
         # Save particle load
-        if save_data:
+        if save_data and not only_calc_ntot:
             tss = self.save_particle_load(randomize=randomize)
             ts.import_times(tss)
         ts.set_time('Save particle load')
@@ -191,6 +191,7 @@ class ParticleLoad:
             'mask_file': None,
             'uniform_particle_number': None,
             'target_mass': None,
+            'target_mass_type': None,
             'identify_gas': False,
 
             # In-/output options
@@ -239,6 +240,12 @@ class ParticleLoad:
             if os.path.isfile(obj_mask_file):
                 cparams['mask_file'] = obj_mask_file
 
+        if cparams['target_mass_type'] is None:
+            if cparams['identify_gas']:
+                cparams['target_mass_type'] = 'mean'
+            else:
+                cparams['target_mass_type'] = 'dmo'
+                    
         return cparams
 
     def get_extra_params(self, params):
@@ -395,7 +402,41 @@ class ParticleLoad:
             if m_target is None:
                 raise ValueError("Must specify target mass!")
 
+            # Need to find  mass of 'raw' particles
             m_target = float(m_target)
+            if self.config['identify_gas']:
+                dm_m_factor = self.config['dm_to_gas_mass_ratio']
+                dm_n_factor = self.config['dm_to_gas_number_ratio']
+                omega = self.cosmo['OmegaBaryon'] / self.cosmo['OmegaDM']
+                omega_i = 1. / omega
+                if dm_n_factor is not None:
+                    if self.config['target_mass_type'] == 'gas':
+                        m_target *= (1 + omega_i) / (1 + dm_n_factor)
+                    elif self.config['target_mass_type'] == 'dm':
+                        m_target *= (1 + omega) / (1 + 1 / dm_n_factor)
+                    else:
+                        raise ValueError("Invalid target_mass_type!")
+                elif dm_m_factor is not None:
+                    if self.config['target_mass_type'] == 'gas':
+                        m_target *= (1 + omega_i) / (1 + omega_i / dm_m_factor)
+                    elif self.config['target_mass_type'] == 'dm':
+                        m_target *= (1 + omega) / (1 + omega * dm_n_factor)
+                    else:
+                        raise ValueError("Invalid target_mass_type!")
+                else:
+                    raise ValueError(
+                        "Must specify either DM/gas number or mass ratio!")
+            else:
+                m_target *= self.cosmo['Omega0']
+                if self.config['target_mass_type'] == 'gas':
+                    m_target /= self.cosmo['OmegaBaryon']
+                elif self.config['target_mass_type'] == 'dm':
+                    m_target /= self.cosmo['OmegaDM']
+                else:
+                    raise ValueError("Invalid target_mass_type!")
+
+            print(f"Raw target particle mass is {m_target:.3e} M_Sun.")
+                
             n_per_gcell = np.cbrt(zone1_gcell_load)
 
             m_frac_target = m_target / self.sim_box['mass_msun']
@@ -1958,8 +1999,8 @@ class ParticleLoad:
         
     def repartition_particles(self):
         """Re-distribute particles across MPI ranks to achieve equal load."""
-        if comm_size == 0:
-            print("Que?")
+        if comm_size == 1:
+            print("Single MPI rank, no repartitioning necessary.")
             return
 
         ts = TimeStamp()
