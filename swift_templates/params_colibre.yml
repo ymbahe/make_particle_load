@@ -207,6 +207,7 @@ COLIBREFeedback:
   SNII_delta_T_n_0_H_p_cm3:         0.3             # Pivot (physical) density in SNII variable-dT thermal feedback in H/cm3.
   SNII_delta_T_K_pivot:             3.16228e6       # Pivot temperature in SNII variable-dT thermal feedback in Kelvin. 
   SNII_delta_T_slope:               0.666666666     # Slope in SNII variable-dT thermal feedback.
+  SNII_delta_T_K:                   3.16228e6       # Minimal change + pivot in temperature to apply to the gas particle in an SNII thermal feedback event in Kelvin.
   SNII_delta_T_K_min:               3.16228e6       # Minimal change in temperature to apply to the gas particle in an SNII thermal feedback event in Kelvin.
   SNII_delta_T_K_max:               1e8             # Maximal change in temperature to apply to the gas particle in na SNII thermal feedback event in Kelvin.
   SNII_energy_erg:                  1.0e51          # Energy of one SNII explosion in ergs.
@@ -326,5 +327,9 @@ Restarts:
   resubmit_on_exit:   1
   resubmit_command:   ./resub.sh
 
-
-
+StructureFinding:
+  config_file_name:         vrconfig.cfg
+  basename:                 stf
+  output_list_on:           0
+  output_list:              list.txt
+  subdir_per_output:        stf

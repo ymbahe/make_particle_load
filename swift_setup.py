@@ -325,8 +325,6 @@ def generate_param_file(data, args):
         
         params['Stars']['luminosity_filename'] = (
             args.table_dir + '/photometry')
-        params['COLIBRECooling']['dir_name'] = (
-            args.table_dir + '/UV_dust1_CR1_G1_shield1.hdf5')
 
     if args.sim_type in ['eagle']:
         params['EAGLECooling']['dir_name'] = (
@@ -334,15 +332,19 @@ def generate_param_file(data, args):
         params['EAGLEFeedback']['filename'] = (
             args.table_dir + '/yieldtables/')
         params['EAGLEAGN']['min_gas_mass_for_nibbling'] = float(m_gas / 2)
+        params['COLIBRECooling']['dir_name'] = (
+            args.table_dir + '/UV_dust1_CR1_G1_shield1.hdf5')
         
     if args.sim_type in ['colibre']:
-        params['DustEvolution']['dust_yield_path'] = (
+        params['DustEvolution']['dust_yields_path'] = (
             args.table_dir + '/dust_yields')
         params['COLIBREFeedback']['filename'] = (
             args.table_dir + '/yieldtables/')
         params['COLIBREFeedback']['earlyfb_filename'] = (
             args.table_dir + '/Early_stellar_feedback.hdf5')
         params['COLIBREAGN']['min_gas_mass_for_nibbling'] = float(m_gas / 2)
+        params['COLIBRECooling']['dir_name'] = (
+            args.table_dir + '/cooling_files_new')
         
         
     # Write the modified param file to the run dir.
