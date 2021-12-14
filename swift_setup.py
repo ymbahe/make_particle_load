@@ -114,7 +114,7 @@ def parse_arguments():
     if args.sim_type not in ['dmo', 'eagle', 'colibre']:
         raise ValueError(
             "Simulation type '{args.sim_type}' is not (yet) supported.")
-    if args.swift_gas and args.sim_type not in ['eagle']:
+    if args.swift_gas and args.sim_type not in ['eagle', 'colibre']:
         raise ValueError(
             f"Cannot run gas simulation with type '{args.sim_type}'!")
     
