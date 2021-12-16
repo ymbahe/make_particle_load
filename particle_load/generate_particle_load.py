@@ -2247,7 +2247,7 @@ class ParticleLoad:
         print(f"Generate files for codes '{codes}'")
 
         fft_params = self.compute_fft_params()
-        n_cores_icgen = self.get_icgen_core_number(fft_params, optimal=False)
+        n_cores_icgen = self.get_icgen_core_number(fft_params)
         eps = self.compute_softenings()
 
         all_params = self.compile_param_dict(fft_params, eps, n_cores_icgen)
@@ -2363,7 +2363,7 @@ class ParticleLoad:
         }
         return fft_highres_grid_params
 
-    def get_icgen_core_number(self, fft_params, optimal=False):
+    def get_icgen_core_number(self, fft_params):
         """
         Determine number of cores to use based on memory requirements.
         Number of cores must also be a factor of ndim_fft.
@@ -2372,8 +2372,6 @@ class ParticleLoad:
         ----------
         fft_params : dict
             The parameters of the high-res FFT grid
-        optimal : bool
-            Switch to enable an "optimal" number of cores (default: False)
 
         Returns
         -------
@@ -2390,39 +2388,30 @@ class ParticleLoad:
         if comm_rank != 0:
             return
 
-        if optimal:
-            origin = 'optimized'
-            n_max_part, n_max_disp = self.compute_optimal_ic_mem()
-        else:
-            origin = 'default'
-            n_max_part = self.extra_params['icgen_nmaxpart'] * 0.95 # safety
-            n_max_disp = self.extra_params['icgen_nmaxdisp'] * 0.95 # margins
-        print(f"Using {origin} n_max_part={n_max_part}, "
-              f"n_max_disp={n_max_disp}.")
+        # Apply a safety margin around the maximum values allowed by IC-Gen.
+        # This might help prevent 'STATE' errors...
+        num_max_part = int(self.extra_params['icgen_nmaxpart'] * 0.95)
+        num_max_disp = int(self.extra_params['icgen_nmaxdisp'] * 0.95)
+        print(f"n_max_part={n_max_part}, n_max_disp={n_max_disp}.")
 
         n_dim_fft = fft_params['n_mesh']
         num_cores_per_node = self.extra_params['num_cores_per_node']
 
         # Find number of cores that satisfies both FFT and particle constraints
-        n_cores_from_fft = int(
-            np.ceil((2*n_dim_fft**2 * (n_dim_fft/2 + 1))) / n_max_disp)
-        n_cores_from_npart = int(np.ceil(self.nparts['tot_all'] / n_max_part))
-        n_cores = max(n_cores_from_fft, n_cores_from_npart)
+        # Checking both independently may seem counter-intuitive, but is
+        # correct because the constraint is the statically allocated memory
+        # for the mesh and particle storage separately.
+        num_cores_from_fft = n_dim_fft**2 * (n_dim_fft + 2) / num_max_disp
+        num_cores_from_npart = self.nparts['tot_all'] / num_max_part
+        num_cores_from_fft = int(np.ceil(num_cores_from_fft))
+        num_cores_from_npart = int(np.ceil(num_cores_from_npart))
 
-        # Increase n_cores until n_dim_fft is an integer multiple
-        while (n_dim_fft % n_cores) != 0:
-            n_cores += 1
-  
-        # If we're using one node, try to use as many of the cores as possible
-        # (but still such that ndim_fft is an integer multiple). Since the
-        # starting ncores works, we can safely increase n_fft_per_core
-        if n_cores < num_cores_per_node:
-            n_cores = num_cores_per_node
-            while (n_dim_fft % n_cores) != 0:
-                n_cores -= 1
- 
-        print(f"--- Using {n_cores} cores for IC-gen (minimum need for "
-              f"{n_cores_from_fft} for FFT, {n_cores_from_npart} "
+        num_cores = max(num_cores_from_fft, num_cores_from_npart)
+        num_cores = find_allowed_core_number(
+            num_cores, n_dim_fft, num_cores_per_node)
+
+        print(f"--- Using {num_cores} cores for IC-gen (minimum need for "
+              f"{num_cores_from_fft} for FFT, {num_cores_from_npart} "
               f"for particles).")
         print(f"n_dim_fft = {n_dim_fft}")
 
@@ -2430,8 +2419,11 @@ class ParticleLoad:
 
     def compute_optimal_ic_mem(self, n_fft):
         """
-        Compute the optimal memory to fit IC-Gen on cosma7.
+        Compute the optimal particle and FFT number per MPI rank.
 
+        Prints the numbers that optimize the required number of cores, as
+        indication for possible custom-compilations of IC_Gen.
+        
         Parameters
         ----------
         n_fft : int
@@ -2439,27 +2431,45 @@ class ParticleLoad:
 
         Returns
         -------
-        max_parts : int
-            The maximal number of particles that can be handled per core
-        max_fft : int
-            The maximal number of FFT grid points that can be handled per core
-
+        None
         """
         bytes_per_particle = 66
         bytes_per_fft_cell = 20
  
         num_parts = self.nparts['tot_all']
-        num_fft = n_fft**3
+        num_disps = n_fft**2 * (n_fft + 2)
         total_memory = ((bytes_per_particle * num_parts) +
-                        (bytes_per_fft_cell * num_fft))
+                        (bytes_per_fft_cell * num_disps))
 
         num_cores = total_memory / self.extra_params['memory_per_core']
+        num_cores = find_allowed_core_number(
+            num_cores, n_fft, self.extra_params['num_cores_per_node'])
+        
         max_parts = num_parts / num_cores
-        max_fft = num_fft / num_cores
-        print(f"--- Optimal max_parts={max_parts}, max_fft = {max_fft}")
+        max_disps = num_disps / num_cores
+        print(f"--- Optimal max_parts={max_parts}, max_disps = {max_disps}")
 
-        return max_parts, max_fft
+        if (max_parts <= self.extra_params['icgen_nmaxpart'] * 0.95 and
+            max_disps <= self.extra_params['icgen_nmaxdisp'] * 0.95):
+            print("Standard parameters are sufficient.")
 
+    def find_allowed_core_number(self, num_cores, n_fft, num_cores_per_node):
+        """Find an allowed number of cores for a given target value."""
+
+        # Increase n_cores until it is an integer divisor of n_dim_fft
+        while (n_fft % num_cores) != 0:
+            num_cores += 1
+
+        # If we're using one node, try to use as many of the cores as possible
+        # (but still such that ndim_fft is an integer multiple). Since the
+        # starting `ncores` works, we will reduce n_cores at most to that.
+        if num_cores < num_cores_per_node:
+            num_cores = num_cores_per_node
+            while (n_dim_fft % num_cores) != 0:
+                num_cores -= 1
+
+        return num_cores
+                    
     def compute_softenings(self, verbose=True) -> dict:
         """
         Compute softening lengths, in units of Mpc.
