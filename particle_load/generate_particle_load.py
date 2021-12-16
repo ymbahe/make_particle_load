@@ -414,26 +414,25 @@ class ParticleLoad:
                         m_target *= (1 + omega_i) / (1 + dm_n_factor)
                     elif self.config['target_mass_type'] == 'dm':
                         m_target *= (1 + omega) / (1 + 1 / dm_n_factor)
-                    else:
-                        raise ValueError("Invalid target_mass_type!")
+
                 elif dm_m_factor is not None:
                     if self.config['target_mass_type'] == 'gas':
                         m_target *= (1 + omega_i) / (1 + omega_i / dm_m_factor)
                     elif self.config['target_mass_type'] == 'dm':
                         m_target *= (1 + omega) / (1 + omega * dm_n_factor)
-                    else:
-                        raise ValueError("Invalid target_mass_type!")
+
                 else:
                     raise ValueError(
                         "Must specify either DM/gas number or mass ratio!")
-            else:
+                
+            elif self.config['target_mass_type'] in ['gas', 'dm']:
                 m_target *= self.cosmo['Omega0']
                 if self.config['target_mass_type'] == 'gas':
                     m_target /= self.cosmo['OmegaBaryon']
                 elif self.config['target_mass_type'] == 'dm':
                     m_target /= self.cosmo['OmegaDM']
                 else:
-                    raise ValueError("Invalid target_mass_type!")
+                    m_target /= self.cosmo['Omega0']
 
             print(f"Raw target particle mass is {m_target:.3e} M_Sun.")
                 
@@ -2328,7 +2327,7 @@ class ParticleLoad:
             raise ValueError(
                 f"Buffered zoom region is too big ({l_mesh:.3e})!")
         num_eff = int(num_part_box * l_mesh**3)
-
+        
         # How many multi-grid FFT levels (this will update n_eff)?
         # Unclear whether this actually does anything...
 
@@ -2340,12 +2339,8 @@ class ParticleLoad:
         if self.extra_params['icgen_multigrid']:
             # Re-calculate size of high-res cube to be a power-of-two
             # fraction of the simulation box size
-            n_levels = int(np.log(1/l_mesh) / np.log(2))
-            print(f"Direct n_levels: {n_levels}")
-            n_levels = 0
-            while 1 / (2.**(n_levels+1)) > l_mesh:
-                n_levels += 1
-            print(f"Loop n_levels: {n_levels}")
+            n_levels = 1 + int(np.log(1/l_mesh) / np.log(2))
+            print(f"Using multi-grid set up with {n_levels} levels.")
 
             actual_l_mesh = 1. / (2.**n_levels)
             actual_l_mesh_mpc = self.sim_box['l_mpc'] / (2.**n_levels)
@@ -2400,8 +2395,8 @@ class ParticleLoad:
             n_max_part, n_max_disp = self.compute_optimal_ic_mem()
         else:
             origin = 'default'
-            n_max_part = self.extra_params['icgen_nmaxpart']
-            n_max_disp = self.extra_params['icgen_nmaxdisp']
+            n_max_part = self.extra_params['icgen_nmaxpart'] * 0.95 # safety
+            n_max_disp = self.extra_params['icgen_nmaxdisp'] * 0.95 # margins
         print(f"Using {origin} n_max_part={n_max_part}, "
               f"n_max_disp={n_max_disp}.")
 
