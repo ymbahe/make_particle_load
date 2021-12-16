@@ -145,7 +145,7 @@ class MakeMask:
             # Set default values for optional parameters
             self.params = {}
             self.params['min_num_per_cell'] = 3
-            self.params['mask_cell_size'] = 3.
+            self.params['cell_size_mpc'] = 3.
             self.params['topology_fill_holes'] = True
             self.params['topology_dilation_niter'] = 0
             self.params['topology_closing_niter'] = 0
@@ -390,7 +390,6 @@ class MakeMask:
 
         # Store mass of target halo used for sorting, for later use
         setattr(self, sort_type, m_halo[halo_index])
-        set_trace()
         return halo_index
 
     def make_mask(self, padding_factor=2.0):
@@ -487,7 +486,16 @@ class MakeMask:
         self.mask_box[1, :] += self.cell_size * 0.5
         self.mask_widths += self.cell_size
         self.mask_extent = np.max(self.mask_widths)
-
+        
+        # Need to re-center such that the *mask* is centred on origin
+        mask_offset = (self.mask_box[1, :] + self.mask_box[0, :]) / 2
+        self.mask_box[0, :] -= mask_offset
+        self.mask_box[1, :] -= mask_offset
+        self.mask_centre += mask_offset
+        self.cell_coords -= mask_offset
+        self.ic_coords -= mask_offset
+        print(f"Re-centred mask by {mask_offset} Mpc.") 
+        
         print(
             f"Encompassing dimensions:\n"
             f"\tx = {self.mask_widths[0]:.4f} Mpc\n"
@@ -496,10 +504,10 @@ class MakeMask:
             f"Bounding length: {self.mask_extent:.4f} Mpc")
 
         box_volume = np.prod(self.mask_widths)
-        n_sel = len(ind_sel)
+        n_sel = len(ind_sel[0])
         cell_fraction = n_sel * self.cell_size**3 / box_volume
         cell_fraction_cube = n_sel * self.cell_size**3 / self.mask_extent**3
-        print(f'There are {len(ind_sel):d} selected mask cells.')
+        print(f'There are {n_sel:d} selected mask cells.')
         print(f'They fill {cell_fraction * 100:.3f} per cent of the bounding '
               f'box ({cell_fraction_cube * 100:.3f} per cent of bounding '
               f'cube).')
@@ -720,8 +728,8 @@ class MakeMask:
         # none, set lower (upper) vertices to very large (very negative)
         # numbers so that they will not influence the cross-MPI min/max.
         n_part = r.shape[0]
-        box[0, :] = np.min(r, axis=0) if n_part > 0 else sys.float_info.max
-        box[1, :] = np.max(r, axis=0) if n_part > 0 else -sys.float_info.max
+        box[0, :] = np.min(r, axis=0) - 0.01 if n_part > 0 else sys.float_info.max
+        box[1, :] = np.max(r, axis=0) + 0.01 if n_part > 0 else -sys.float_info.max
 
         # Now compare min/max values across all MPI ranks
         if not serial_only:
@@ -767,7 +775,7 @@ class MakeMask:
 
         # Work out how many cells we need along each dimension so that the
         # cells remain below the specified threshold size
-        num_bins = int(np.ceil(width / self.params['mask_cell_size']))
+        num_bins = int(np.ceil(width / self.params['cell_size_mpc']))
 
         # Compute number of particles in each cell, across MPI ranks
         n_p, edges = np.histogramdd(
