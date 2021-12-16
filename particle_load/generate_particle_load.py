@@ -2259,7 +2259,7 @@ class ParticleLoad:
 
     def compute_fft_params(self):
         """
-        Work out what size of FFT grid we need for IC-Gen.
+        Work out what FFT grid dimensions we need for IC-Gen.
 
         Parameters
         ----------
@@ -2274,41 +2274,120 @@ class ParticleLoad:
         # VIPs only
         if comm_rank != 0:
             return
+        
+        num_part_box = self.sim_box['num_part_equiv']
+        n_part_box = int(np.rint(np.cbrt(num_part_box)))
+        
+        # Zoom vs. non-zoom
+        if self.config['is_zoom']:
+            l_hr = (self.extra_params['icgen_fft_to_gcube_ratio'] *
+                      self.gcube['sidelength'])
+            if l_hr > 1:
+                raise ValueError(
+                f"Buffered zoom region is too big ({l_hr:.3e})!")
+            num_eff = int(np.rint(num_part_box * l_hr**3))
+            l_hr_mpc = l_hr * self.sim_box['l_mpc']
 
-        n_fft_start = self.extra_params['fft_n_base']
-        f_Nyquist = self.extra_params['fft_min_Nyquist_factor']
+        else:
+            num_eff = num_part_box
+            l_hr_mpc = self.sim_box['l_mpc']
+        
+        # Are we doing a multi-grid setup (only possible for zooms)?
+        if use_multi_grid(l_hr):
+            self.extra_params['icgen_multigrid'] = True
 
-        fft = self.compute_fft_highres_grid()
-        print(
-            f"--- HRgrid:\n   c={self.centre}, "
-            f"L_box={self.sim_box['l_mpc']:.2f} Mpc\n"
-            f"L_grid={fft['l_mesh_mpc']:.2f} Mpc, "
-            f"n_eff={fft['n_eff']:.2f} (x2 = {fft['n_eff']*2:.2f})\n"
-            f"FFT buffer fraction="
-            f"{self.extra_params['icgen_fft_to_gcube_ratio']:.2f}"
-        )
+            # Re-calculate size of high-res cube to be a power-of-two
+            # fraction of the simulation box size
+            n_levels = 1 + int(np.log(1/l_mesh) / np.log(2))
+            print(f"Using multi-grid set up with {n_levels} levels.")
 
+            l_inner_mesh = 1 / (2**n_levels)
+            l_inner_mesh_mpc = l_inner_mesh * self.sim_box['l_mpc']
+            n_eff_fft = int(np.ceil(np.cbrt(num_part_box * l_inner_mesh**3)))
+            
+            print(
+                f"--- Setting up multi-grid IC_Gen ({n_levels} levels) --- \n"
+                f"   Smallest mesh = {l_inner_mesh_mpc:.2f} Mpc"
+            )
+
+        else:
+            self.extra_params['icgen_multigrid'] = False
+            n_eff_fft = n_part_box
+
+        n_fft = find_fft_mesh_size(n_eff_fft)
+        print(f"Using FFT mesh with n={n_fft} (n_eff = {n_eff_fft}, "
+              f"ratio = {n_fft / n_eff_fft}).")
+        
+        # Need to check this...
+        #print(
+        #    f"--- HRgrid:\n   c={self.centre}, "
+        #    f"L_box={self.sim_box['l_mpc']:.2f} Mpc\n"
+        #    f"L_grid={fft['l_mesh_mpc']:.2f} Mpc, "
+        #    f"n_eff={fft['n_eff']:.2f} (x2 = {fft['n_eff']*2:.2f})\n"
+        #    f"FFT buffer fraction="
+        #    f"{self.extra_params['icgen_fft_to_gcube_ratio']:.2f}"
+        #)
+
+
+        fft = {
+            'n_mesh': n_fft,
+            'num_eff_hr': num_eff,
+            'n_eff_hr': np.cbrt(num_eff),
+            'l_hr_mpc': l_hr_mpc, 
+        } 
+        return fft
+
+    def use_multi_grid(self, l_hr):
+        """Check whether we use a multi-grid in IC_Gen."""
+        if not self.config['is_zoom']:
+            return False
+        
+        if l_hr > 0.5:
+            print(f"*** Cannot use multigrid ICs, mesh region is "
+                  f"{l_mesh:.2f} > 0.5.")
+            return False
+
+        return True
+
+    
+    def find_fft_mesh_size(n_part):
+        """
+        Calculate the number of points per dimension for the FFTW mesh.
+
+        Parameters
+        ----------
+        n_part : int
+            The (effective) number of particles per dimension over the
+            extent of the mesh.
+
+        Returns
+        -------
+        n_fftw : int
+            The side length of the FFTW mesh.
+
+        """
         # Find the minimum FFT grid size that is at least a factor
-        # self.fft_min_Nyquist_factor larger than the Nyquist criterion
-        # (i.e. the effective number of particles per dimension) and is a
-        # multiple of n_fft_start
-        n_fft_required = (fft['n_eff'] * f_Nyquist)
+        # `fft_min_Nyquist_factor` larger than the effective number of
+        # particles per dimension
+        f_Nyquist = self.extra_params['fft_min_Nyquist_factor']
+        n_fft_base = self.extra_params['fft_n_base']
+        
+        n_fft_required = (n_part * f_Nyquist)
+
         pow2 = int(np.ceil(np.log(n_fft_required / n_fft_start) / np.log(2)))
         n_fft = n_fft_start * 2**pow2
+
         nyq_ratio = n_fft / fft['n_eff']
         print(f"Using FFT grid with {n_fft} points per side\n"
               f"   ({nyq_ratio:.2f} times the target-res Nyquist frequency).")
 
-        fft['n_mesh'] = n_fft
-        return fft
+        return n_fft
 
+    
     def compute_fft_highres_grid(self):
-        """Compute the properties of the FFT high-res grid."""
+        """** OBSOLETE ** Compute the properties of the FFT high-res grid."""
         if comm_rank != 0:
             return None
-
-        # Extract the number of particles if the whole box were at target res
-        num_part_box = self.sim_box['num_part_equiv']
 
         # This is trivial for periodic box simulations
         if not self.config['is_zoom']:
