@@ -646,14 +646,14 @@ class ParticleLoad:
         # Magic, part II: populate outer region with particles (Zone III)
         self.generate_zone3_particles(parts)
         ts.set_time('Generate Zone-III particles')
-        
-        # -------------------------------------------------------------------
-        # --- Act III: Transformation (shift coordinate system to target) ---
-        # -------------------------------------------------------------------
 
         # Make sure that the particles are sensible before shifting
         self.verify_particles(parts)
         ts.set_time('Overall particle verification')
+
+        # -------------------------------------------------------------------
+        # --- Act III: Transformation (shift coordinate system to target) ---
+        # -------------------------------------------------------------------
 
         # Move particle load to final position in the simulation box
         self.shift_particles_to_target_position(parts)
@@ -1802,7 +1802,7 @@ class ParticleLoad:
         ts = TimeStamp()
         
         if comm_rank == 0:
-            print("")
+            print("\nVerifying particles...")
         npart_local = self.nparts['tot_local']
         npart_global = self.nparts['tot_all']
 
@@ -1844,8 +1844,8 @@ class ParticleLoad:
         com = centre_of_mass_mpi(parts['pos'], parts['m'])
         ts.set_time('Check centre of mass')
         if comm_rank == 0:
-            print(f"Centre of mass for all particles (in units of the box "
-                  f"size): [{com[0]:.2f}, {com[1]:.2f}, {com[2]:.2f}].")
+            print(f"   Full centre of mass (in units of the box "
+                  f"size): [{com[0]:.2f}, {com[1]:.2f}, {com[2]:.2f}]")
             if (np.max(np.abs(com)) > 0.1):
                 print(
                     f"**********\n   WARNING!!! \n***********\n"
@@ -1853,15 +1853,9 @@ class ParticleLoad:
                     f"geometric box centre!"
                 )
 
-        # Announce success if we got here.
-        if comm_rank == 0:
-            print(
-                f"Done verifying {self.nparts['tot_all']:,} "
-                f"({self.nparts['tot_all']**(1/3):.2f}^3) particles."
-            )
-
+        print(f"   Verification successful.")
         ts.set_time('Final messages')
-        ts.print_time_usage('Finished verify_particles')
+        #ts.print_time_usage('Finished verify_particles')
         
             
     def shift_particles_to_target_position(self, parts):
@@ -1886,15 +1880,15 @@ class ParticleLoad:
         parts['pos'] %= 1.0
         ts.set_time('Do periodic wrapping')
         
-        if comm_rank == 0:
-            print(f"\nShifted particles such that the Lagrangian centre of "
-                  f"high-res region is at\n   "
-                  f"{self.centre[0]:.3f} / {self.centre[1]:.3f} / "
-                  f"{self.centre[2]:.3f}."
-            )
+        #if comm_rank == 0:
+        #    print(f"Shifted particles such that the Lagrangian centre of "
+        #          f"high-res region is at\n   "
+        #          f"{self.centre[0]:.3f} / {self.centre[1]:.3f} / "
+        #          f"{self.centre[2]:.3f}."
+        #    )
 
         ts.set_time('Print message')
-        ts.print_time_usage('Finished shift_particles')
+        #ts.print_time_usage('Finished shift_particles')
         
             
     # ------------- Routines for saving the particle load -------------------
@@ -2055,7 +2049,7 @@ class ParticleLoad:
             print('Done with load balancing.')
 
         ts.set_time('Finishing')
-        ts.print_time_usage('Finished repartitioning')
+        #ts.print_time_usage('Finished repartitioning')
             
     def find_fortran_file_split(self):
         """Work out how many Fortran files to write per rank."""
@@ -2244,11 +2238,11 @@ class ParticleLoad:
         Create appropriate parameter and submit files for IC-GEN and SWIFT.
         """
         codes = self.extra_params['code_types']
-        print(f"Generate files for codes '{codes}'")
+        print(f"\nGenerate files for code(s) '{codes}'...")
 
         fft_params = self.compute_fft_params()
         n_cores_icgen = self.get_icgen_core_number(fft_params)
-        eps = self.compute_softenings()
+        #eps = self.compute_softenings()
 
         all_params = self.compile_param_dict(fft_params, eps, n_cores_icgen)
 
@@ -2290,49 +2284,42 @@ class ParticleLoad:
 
         else:
             num_eff = num_part_box
+            l_hr = 1.0
             l_hr_mpc = self.sim_box['l_mpc']
         
         # Are we doing a multi-grid setup (only possible for zooms)?
-        if use_multi_grid(l_hr):
+        if self.use_multi_grid(l_hr):
             self.extra_params['icgen_multigrid'] = True
 
-            # Re-calculate size of high-res cube to be a power-of-two
-            # fraction of the simulation box size
-            n_levels = 1 + int(np.log(1/l_mesh) / np.log(2))
-            print(f"Using multi-grid set up with {n_levels} levels.")
-
-            l_inner_mesh = 1 / (2**n_levels)
+            # Find smallest grid that fully encloses the HR region
+            # (grids shrink by successive factors of 2)
+            n_levels = 1 + int(np.log(1/l_hr) / np.log(2))
+            l_inner_mesh = 1 / (2**(n_levels-1))
             l_inner_mesh_mpc = l_inner_mesh * self.sim_box['l_mpc']
             n_eff_fft = int(np.ceil(np.cbrt(num_part_box * l_inner_mesh**3)))
-            
-            print(
-                f"--- Setting up multi-grid IC_Gen ({n_levels} levels) --- \n"
-                f"   Smallest mesh = {l_inner_mesh_mpc:.2f} Mpc"
-            )
 
         else:
             self.extra_params['icgen_multigrid'] = False
+            l_inner_mesh_mpc = l_hr_mpc
             n_eff_fft = n_part_box
+            n_levels = 1
 
-        n_fft = find_fft_mesh_size(n_eff_fft)
-        print(f"Using FFT mesh with n={n_fft} (n_eff = {n_eff_fft}, "
-              f"ratio = {n_fft / n_eff_fft}).")
-        
-        # Need to check this...
-        #print(
-        #    f"--- HRgrid:\n   c={self.centre}, "
-        #    f"L_box={self.sim_box['l_mpc']:.2f} Mpc\n"
-        #    f"L_grid={fft['l_mesh_mpc']:.2f} Mpc, "
-        #    f"n_eff={fft['n_eff']:.2f} (x2 = {fft['n_eff']*2:.2f})\n"
-        #    f"FFT buffer fraction="
-        #    f"{self.extra_params['icgen_fft_to_gcube_ratio']:.2f}"
-        #)
+        # Find next-largest allowed FFT size
+        n_fft = self.find_fft_mesh_size(n_eff_fft)
 
+        f_hr = l_hr
+        print(
+            f"   High-res grid: L={l_hr_mpc:.2f} Mpc "
+            f"({100*l_hr**3:.2f}% of box volume).\n"
+            f"   {n_levels} FFT levels, innermost grid has "
+            f"L={l_inner_mesh_mpc} Mpc.\n"
+            f"   FFT mesh: n={n_fft} (n_eff_part = {n_eff_fft}, "
+            f"ratio = {n_fft / n_eff_fft:.2f})."
 
+        )
         fft = {
             'n_mesh': n_fft,
             'num_eff_hr': num_eff,
-            'n_eff_hr': np.cbrt(num_eff),
             'l_hr_mpc': l_hr_mpc, 
         } 
         return fft
@@ -2343,14 +2330,14 @@ class ParticleLoad:
             return False
         
         if l_hr > 0.5:
-            print(f"*** Cannot use multigrid ICs, mesh region is "
-                  f"{l_mesh:.2f} > 0.5.")
+            print(f"*** Cannot use multigrid ICs, HR region size is "
+                  f"{l_hr:.2f} > 0.5.")
             return False
 
         return True
 
     
-    def find_fft_mesh_size(n_part):
+    def find_fft_mesh_size(self, n_part):
         """
         Calculate the number of points per dimension for the FFTW mesh.
 
@@ -2374,12 +2361,8 @@ class ParticleLoad:
         
         n_fft_required = (n_part * f_Nyquist)
 
-        pow2 = int(np.ceil(np.log(n_fft_required / n_fft_start) / np.log(2)))
-        n_fft = n_fft_start * 2**pow2
-
-        nyq_ratio = n_fft / fft['n_eff']
-        print(f"Using FFT grid with {n_fft} points per side\n"
-              f"   ({nyq_ratio:.2f} times the target-res Nyquist frequency).")
+        pow2 = int(np.ceil(np.log(n_fft_required / n_fft_base) / np.log(2)))
+        n_fft = n_fft_base * 2**pow2
 
         return n_fft
 
@@ -2471,7 +2454,6 @@ class ParticleLoad:
         # This might help prevent 'STATE' errors...
         num_max_part = int(self.extra_params['icgen_nmaxpart'] * 0.95)
         num_max_disp = int(self.extra_params['icgen_nmaxdisp'] * 0.95)
-        print(f"n_max_part={n_max_part}, n_max_disp={n_max_disp}.")
 
         n_dim_fft = fft_params['n_mesh']
         num_cores_per_node = self.extra_params['num_cores_per_node']
@@ -2486,15 +2468,13 @@ class ParticleLoad:
         num_cores_from_npart = int(np.ceil(num_cores_from_npart))
 
         num_cores = max(num_cores_from_fft, num_cores_from_npart)
-        num_cores = find_allowed_core_number(
+        num_cores = self.find_allowed_core_number(
             num_cores, n_dim_fft, num_cores_per_node)
 
-        print(f"--- Using {num_cores} cores for IC-gen (minimum need for "
-              f"{num_cores_from_fft} for FFT, {num_cores_from_npart} "
-              f"for particles).")
-        print(f"n_dim_fft = {n_dim_fft}")
+        print(f"   {num_cores} cores (need {num_cores_from_fft} for FFT, "
+              f"{num_cores_from_npart} for particles).")
 
-        return n_cores
+        return num_cores
 
     def compute_optimal_ic_mem(self, n_fft):
         """
@@ -2544,7 +2524,7 @@ class ParticleLoad:
         # starting `ncores` works, we will reduce n_cores at most to that.
         if num_cores < num_cores_per_node:
             num_cores = num_cores_per_node
-            while (n_dim_fft % num_cores) != 0:
+            while (n_fft % num_cores) != 0:
                 num_cores -= 1
 
         return num_cores
@@ -2678,27 +2658,27 @@ class ParticleLoad:
             extra_params[f'icgen_constraint_phase_descriptor{key_suffix}'])
         param_dict['icgen_multigrid'] = extra_params['icgen_multigrid']
         param_dict['icgen_n_fft_mesh'] = fft_params['n_mesh']
-        param_dict['icgen_highres_num_eff'] = fft_params['num_eff']
-        param_dict['icgen_highres_n_eff'] = fft_params['num_eff']**(1/3)
-        param_dict['icgen_highres_l_mpchi'] = fft_params['l_mesh_mpc']*cosmo_h
-
+        param_dict['icgen_highres_num_eff'] = fft_params['num_eff_hr']
+        param_dict['icgen_highres_n_eff'] = np.cbrt(fft_params['num_eff_hr'])
+        param_dict['icgen_highres_l_mpchi'] = fft_params['l_hr_mpc']*cosmo_h
+        
         # Simulation-specific parameters
-        param_dict['sim_eps_dm_mpc'] = eps['dm']
-        param_dict['sim_eps_dm_pmpc'] = eps['dm_proper']
-        param_dict['sim_eps_baryon_mpc'] = eps['baryons']
-        param_dict['sim_eps_baryon_pmpc'] = eps['baryons_proper']
+        #param_dict['sim_eps_dm_mpc'] = eps['dm']
+        #param_dict['sim_eps_dm_pmpc'] = eps['dm_proper']
+        #param_dict['sim_eps_baryon_mpc'] = eps['baryons']
+        #param_dict['sim_eps_baryon_pmpc'] = eps['baryons_proper']
 
-        param_dict['sim_eps_dm_mpchi'] = eps['dm'] * cosmo_h
-        param_dict['sim_eps_dm_pmpchi'] = eps['dm_proper'] * cosmo_h
-        param_dict['sim_eps_baryon_mpchi'] = eps['baryons'] * cosmo_h
-        param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper'] * cosmo_h
+        #param_dict['sim_eps_dm_mpchi'] = eps['dm'] * cosmo_h
+        #param_dict['sim_eps_dm_pmpchi'] = eps['dm_proper'] * cosmo_h
+        #param_dict['sim_eps_baryon_mpchi'] = eps['baryons'] * cosmo_h
+        #param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper'] * cosmo_h
 
-        param_dict['sim_eps_to_mips_background'] = (
-            extra_params['background_eps_ratio'])
+        #param_dict['sim_eps_to_mips_background'] = (
+        #    extra_params['background_eps_ratio'])
 
-        param_dict['sim_aexp_initial'] = 1 / (1 + extra_params['z_initial'])
-        param_dict['sim_aexp_final'] = 1 / (1 + extra_params['z_final'])
-        param_dict['sim_type'] = extra_params['sim_type']
+        #param_dict['sim_aexp_initial'] = 1 / (1 + extra_params['z_initial'])
+        #param_dict['sim_aexp_final'] = 1 / (1 + extra_params['z_final'])
+        #param_dict['sim_type'] = extra_params['sim_type']
 
         # SWIFT-specific parameters
         param_dict['swift_run_dir'] = extra_params['swift_run_dir']
@@ -3145,8 +3125,8 @@ def centre_of_mass_mpi(coords, masses):
     com_z = comm.reduce(com_local[2] * m_tot)
     m_tot = comm.reduce(m_tot)
     ts.set_time('MPI')
-    if comm_rank == 0:
-        ts.print_time_usage('Finished centre_of_mass_mpi')
+    #if comm_rank == 0:
+    #    ts.print_time_usage('Finished centre_of_mass_mpi')
     
     return np.array((com_x, com_y, com_z)) / m_tot
 
