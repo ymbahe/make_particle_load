@@ -302,21 +302,6 @@ class ParticleLoad:
             'icgen_constraint_phase_descriptor2_path': '%dummy',
             'icgen_powspec_dir': '../..',
 
-            # Softening parameters
-            'comoving_eps_ratio': 1/20,
-            'proper_eps_ratio': 1/45,            
-            'background_eps_ratio': 0.02,
-            
-            # SWIFT specific options
-            'swift_run_dir': None,
-            'swift_num_nodes': 1,
-            'swift_runtime_hours': 72,
-            'swift_ics_dir': '../ICs',
-            'swift_exec': '../swiftsim/examples/swift',
-            'swift_num_nodes': 1,
-            'swift_runtime_hours': 72,
-            'swift_module_setup': None,
-
             # System-specific parameters
             'slurm_partition': None,
             'slurm_account': None,
@@ -434,7 +419,7 @@ class ParticleLoad:
                 else:
                     m_target /= self.cosmo['Omega0']
 
-            print(f"Raw target particle mass is {m_target:.3e} M_Sun.")
+            print(f"Ideal target particle mass is {m_target:.3e} M_Sun.")
                 
             n_per_gcell = np.cbrt(zone1_gcell_load)
 
@@ -457,7 +442,7 @@ class ParticleLoad:
                 f"Zone I gcell load ({zone1_gcell_load})!"
             )
         self.sim_box['num_part_equiv'] = num_part_equiv
-        self.sim_box['n_part_equiv'] = np.cbrt(num_part_equiv)
+        self.sim_box['n_part_equiv'] = int(np.rint(np.cbrt(num_part_equiv)))
 
         print(f"Target resolution is {m_target:.2e} M_Sun, eqiv. to "
               f"n = {self.sim_box['n_part_equiv']}^3.")
@@ -594,9 +579,9 @@ class ParticleLoad:
 
         """
         if comm_rank == 0:
-            print('\n---------------------------')
+            print('')
             print('Generating particle load...')
-            print('---------------------------\n')
+            print('............................\n')
 
         ts = TimeStamp()
         ts.add_counters(['Other'])
@@ -742,10 +727,10 @@ class ParticleLoad:
                 f"Finished setting up gcube ({time.time() - stime:.2e} sec.)\n"
                 f"  Side length: {gcube['sidelength_mpc']:.4f} Mpc "
                 f"(= {gcube['sidelength']:.3e} x box size)\n"
-                f"  Volume: {gcube['volume_mpc']:.4f} Mpc^3 "
-                f"({gcube['volume'] * 100:.3f} % of the simulation volume,\n      "
-                f"{gcube['volume']/(mask_cube_size**3) * 100:.3f} % "
-                f"of the mask bounding cube)\n"
+                f"  Volume: {gcube['volume_mpc']:.4f} Mpc^3\n"
+                f"     {gcube['volume']*100:.3f} % of the simulation volume,\n"
+                f"     {gcube['volume']/(mask_cube_size**3) * 100:.3f} % "
+                f"of the mask bounding cube\n"
                 f"  {gcube['n_cells']} gcells per dimension, of size "
                 f"{gcube['cell_size_mpc']:.3f} Mpc\n"
                 f"  {gcube['num_cells']} gcells in total\n"
@@ -1918,8 +1903,13 @@ class ParticleLoad:
         save_as_fortran_binary = 'fortran' in output_formats
         # If we don't save in either format, we can stop right here.
         if not save_as_hdf5 and not save_as_fortran_binary:
+            if comm_rank == 0:
+                print("Not saving particles.")
             return
 
+        if comm_rank == 0:
+            print("\nSaving particles...")
+        
         # Randomise arrays, if desired
         if randomize:
             if comm_rank == 0:
@@ -1980,7 +1970,7 @@ class ParticleLoad:
 
                 if self.verbose:
                     print(
-                        f"[Rank {comm_rank}] Finished saving "
+                        f"   [Rank {comm_rank}] Finished saving "
                         f"{self.nparts['tot_local']} local particles.")
 
             # Make all ranks wait so that we don't have too many writing
@@ -1993,7 +1983,7 @@ class ParticleLoad:
     def repartition_particles(self):
         """Re-distribute particles across MPI ranks to achieve equal load."""
         if comm_size == 1:
-            print("Single MPI rank, no repartitioning necessary.")
+            print("   Single MPI rank, no repartitioning necessary.")
             return
 
         ts = TimeStamp()
@@ -2013,10 +2003,10 @@ class ParticleLoad:
         if comm_rank == 0:
             n_per_rank = num_per_rank[0]**(1/3.)
             print(
-                f"Load balancing {num_part_all} particles across "
-                f"{comm_size} ranks ({n_per_rank:.2f}^3 per rank)...\n"
-                f"Current load ranges from "
-                f"{num_part_min} to {num_part_max} particles."
+                f"   Load balancing {num_part_all} particles across "
+                f"   {comm_size} ranks ({n_per_rank:.2f}^3 per rank)...\n"
+                f"   Current load ranges from "
+                f"   {num_part_min} to {num_part_max} particles."
             )
         ts.set_time('Setup')
             
@@ -2058,7 +2048,7 @@ class ParticleLoad:
             np.ceil(self.parts['m'].shape[0] / max_num_per_file))
         num_files = comm.allreduce(num_files, op=MPI.MAX)
         if comm_rank == 0:
-            print(f"Will write {num_files} Fortran files per rank.")
+            print(f"   Will write {num_files} Fortran files per rank.")
 
         return num_files
 
@@ -2092,7 +2082,7 @@ class ParticleLoad:
             g.attrs.create('ThisFile', comm_rank)
 
         if comm_rank == 0:
-            print(f"Done saving local particles to '{save_loc}'.")
+            print(f"   Done saving local particles to '{save_loc}'.")
 
     def save_local_particles_as_binary(
         self, index, tot_num_files, save_loc, start=None, end=None):
@@ -2147,7 +2137,7 @@ class ParticleLoad:
         f.close()
 
         if comm_rank == 0:
-            print(f"Done saving local particles to '{save_loc}'.")
+            print(f"   Done saving local particles to '{save_loc}'.")
 
     def save_metadata(self):
         """Save the metadata to an HDF5 file."""
@@ -2238,13 +2228,12 @@ class ParticleLoad:
         Create appropriate parameter and submit files for IC-GEN and SWIFT.
         """
         codes = self.extra_params['code_types']
-        print(f"\nGenerate files for code(s) '{codes}'...")
+        print(f"\nPrepare information for code(s) '{codes}'...")
 
         fft_params = self.compute_fft_params()
         n_cores_icgen = self.get_icgen_core_number(fft_params)
-        #eps = self.compute_softenings()
-
-        all_params = self.compile_param_dict(fft_params, eps, n_cores_icgen)
+        
+        all_params = self.compile_param_dict(fft_params, n_cores_icgen)
 
         if create_param:
             pr.make_all_param_files(all_params, codes.lower())
@@ -2366,65 +2355,6 @@ class ParticleLoad:
 
         return n_fft
 
-    
-    def compute_fft_highres_grid(self):
-        """** OBSOLETE ** Compute the properties of the FFT high-res grid."""
-        if comm_rank != 0:
-            return None
-
-        # This is trivial for periodic box simulations
-        if not self.config['is_zoom']:
-            fft_params = {
-                'num_eff': num_part_box,
-                'n_eff': int(np.rint(np.cbrt(num_part_box))),
-                'l_mesh_mpc': self.sim_box['l_mpc']
-            }
-            return fft_params
-
-        # Rest is only for "standard" (cubic) zooms        
-        l_mesh = (self.extra_params['icgen_fft_to_gcube_ratio'] *
-                  self.gcube['sidelength'])
-        l_mesh_mpc = l_mesh * self.sim_box['l_mpc']
-        if l_mesh > 1.:
-            raise ValueError(
-                f"Buffered zoom region is too big ({l_mesh:.3e})!")
-        num_eff = int(num_part_box * l_mesh**3)
-        
-        # How many multi-grid FFT levels (this will update n_eff)?
-        # Unclear whether this actually does anything...
-
-        if self.extra_params['icgen_multigrid'] and l_mesh > 0.5:
-            print(f"*** Cannot use multigrid ICs, mesh region is "
-                  f"{l_mesh:.2f} > 0.5")
-            self.extra_params['icgen_multigrid'] = False
-
-        if self.extra_params['icgen_multigrid']:
-            # Re-calculate size of high-res cube to be a power-of-two
-            # fraction of the simulation box size
-            n_levels = 1 + int(np.log(1/l_mesh) / np.log(2))
-            print(f"Using multi-grid set up with {n_levels} levels.")
-
-            actual_l_mesh = 1. / (2.**n_levels)
-            actual_l_mesh_mpc = self.sim_box['l_mpc'] / (2.**n_levels)
-            if (actual_l_mesh_mpc < l_mesh_mpc):
-                raise Exception("Multi-grid l_mesh is too small!")
-
-            actual_num_eff = int(num_part_box * actual_l_mesh**3)
-            
-            print(
-                f"--- HRgrid num multigrids={n_levels}, "
-                f"lowest = {actual_l_mesh_mpc:.2f} Mpc, "
-                f"n_eff = {actual_num_eff**(1/3):.2f}^3 "
-                f"(x2: {2*actual_num_eff**(1/3):.2f}^3)"
-            )
-        
-        fft_highres_grid_params = {
-                'num_eff': num_eff,
-                'n_eff': int(np.rint(np.cbrt(num_eff))), # Exact up to precision
-                'l_mesh_mpc': l_mesh_mpc,
-        }
-        return fft_highres_grid_params
-
     def get_icgen_core_number(self, fft_params):
         """
         Determine number of cores to use based on memory requirements.
@@ -2529,63 +2459,7 @@ class ParticleLoad:
 
         return num_cores
                     
-    def compute_softenings(self, verbose=True) -> dict:
-        """
-        Compute softening lengths, in units of Mpc.
-
-        This is not required for the actual particle load generation, only
-        to make the simulation parameter files.
-
-        Returns
-        -------
-        eps : dict
-            A dictionary with four keys: 'dm' and 'baryons' contain the
-            co-moving softening lengths for DM and baryons (the latter is 0
-            for DM-only simulations). 'dm_proper' and 'baryons_proper' contain
-            the corresponding maximal proper softening lengths.
-        """
-        comoving_ratio = self.extra_params['comoving_eps_ratio']
-        proper_ratio = self.extra_params['proper_eps_ratio']
-
-        # Compute mean inter-particle separation (ips), in Mpc.
-        mean_ips_mpc = self.sim_box['l_mpc'] / self.sim_box['n_part_equiv']
-
-        # Softening lengths for DM
-        eps_dm_mpc = mean_ips_mpc * comoving_ratio
-        eps_dm_proper_mpc = mean_ips_mpc * proper_ratio
-
-        # Softening lengths for baryons
-        if self.extra_params["dm_only_run"]:
-            eps_baryon_mpc = 0.0
-            eps_baryon_proper_mpc = 0.0
-        else:
-            # Adjust DM softening lengths according to baryon fraction
-            fac = (self.cosmo['OmegaBaryon'] / self.cosmo['OmegaDM'])**(1/3)
-            eps_baryon_mpc = eps_dm_mpc * fac
-            eps_baryon_proper_mpc = eps_dm_proper_mpc * fac
-
-        if comm_rank == 0 and verbose:
-            print(f"Computed softening lengths:")
-            h = self.cosmo['hubbleParam']
-            if not self.extra_params["dm_only_run"]:
-                print(f"   Comoving softenings: DM={eps_dm_mpc:.6f}, "
-                      f"baryons={eps_baryon_mpc:.6f} Mpc")
-                print(f"   Max proper softenings: DM={eps_dm_proper_mpc:.6f}, "
-                      f"baryons={eps_baryon_proper_mpc:.6f} Mpc")
-            print(f"   Comoving softenings: DM={eps_dm_mpc:.6f} Mpc, "
-                  f"baryons={eps_baryon_mpc:.6f} Mpc")
-            print(f"   Max proper softenings: DM={eps_dm_proper_mpc:.6f} Mpc, "
-                  f"baryons={eps_baryon_proper_mpc:.6f} Mpc\n")
-
-        eps = {
-            'dm': eps_dm_mpc,
-            'baryons': eps_baryon_mpc,
-            'dm_proper': eps_dm_proper_mpc,
-            'baryons_proper': eps_baryon_proper_mpc
-        }
-        return eps
-
-    def compile_param_dict(self, fft_params, eps, n_cores_icgen):
+    def compile_param_dict(self, fft_params, n_cores_icgen):
         """Compile a dict of all parameters required for param/submit files."""
 
         extra_params = self.extra_params
@@ -2600,17 +2474,17 @@ class ParticleLoad:
             if num_species >= 2:
                 cut_type1_type2 = np.log10(
                     np.mean(self.gcell_info['particle_masses'][0:2]))
-                print(f"log10 mass fraction cut from parttype 1 --> 2 = "
-                      f"{cut_type1_type2:.2f}")
+                print(f"   log10 mass fraction cut from parttype 1 --> 2 = "
+                      f"   {cut_type1_type2:.2f}")
             if num_species == 3:
                 cut_type2_type3 = np.log10(
                     (self.gcell_info['particle_masses'][-1] +
                      self.scube['m_min']) / 2
                 )
-                print(f"log10 mass fraction cut from parttype 2 --> 3 = "
-                      f"{cut_type2_type3:.2f}")
+                print(f"   log10 mass fraction cut from parttype 2 --> 3 = "
+                      f"   {cut_type2_type3:.2f}")
             if num_species > 3:
-                print(f"NumSpecies > 3 not supported, ignoring extra.")
+                print(f"   **NumSpecies > 3 not supported, ignoring extra.**")
 
         l_box_mpchi = self.sim_box['l_mpc'] * cosmo_h
         centre_mpchi = self.centre * l_box_mpchi
@@ -2662,37 +2536,6 @@ class ParticleLoad:
         param_dict['icgen_highres_n_eff'] = np.cbrt(fft_params['num_eff_hr'])
         param_dict['icgen_highres_l_mpchi'] = fft_params['l_hr_mpc']*cosmo_h
         
-        # Simulation-specific parameters
-        #param_dict['sim_eps_dm_mpc'] = eps['dm']
-        #param_dict['sim_eps_dm_pmpc'] = eps['dm_proper']
-        #param_dict['sim_eps_baryon_mpc'] = eps['baryons']
-        #param_dict['sim_eps_baryon_pmpc'] = eps['baryons_proper']
-
-        #param_dict['sim_eps_dm_mpchi'] = eps['dm'] * cosmo_h
-        #param_dict['sim_eps_dm_pmpchi'] = eps['dm_proper'] * cosmo_h
-        #param_dict['sim_eps_baryon_mpchi'] = eps['baryons'] * cosmo_h
-        #param_dict['sim_eps_baryon_pmpchi'] = eps['baryons_proper'] * cosmo_h
-
-        #param_dict['sim_eps_to_mips_background'] = (
-        #    extra_params['background_eps_ratio'])
-
-        #param_dict['sim_aexp_initial'] = 1 / (1 + extra_params['z_initial'])
-        #param_dict['sim_aexp_final'] = 1 / (1 + extra_params['z_final'])
-        #param_dict['sim_type'] = extra_params['sim_type']
-
-        # SWIFT-specific parameters
-        param_dict['swift_run_dir'] = extra_params['swift_run_dir']
-        param_dict['swift_ics_dir'] = extra_params['swift_ics_dir']
-        param_dict['swift_num_nodes'] = extra_params['swift_num_nodes']
-        param_dict['swift_runtime_hours'] = extra_params['swift_runtime_hours']
-        param_dict['swift_exec'] = extra_params['swift_exec']
-        param_dict['swift_gas_splitting_threshold_1e10msun'] = (
-            self.find_gas_splitting_mass())
-        if extra_params['swift_module_setup'] is None:
-            param_dict['swift_module_setup'] = ''
-        else:
-            param_dict['swift_module_setup'] = (
-                f"source {extra_params['swift_module_setup']}")
         param_dict['slurm_partition'] = extra_params['slurm_partition']
         param_dict['slurm_account'] = extra_params['slurm_account']
         param_dict['slurm_email'] = extra_params['slurm_email']
