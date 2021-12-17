@@ -7,6 +7,7 @@ cosmology:           Planck2018           # [REQUIRED] The cosmology to be used 
 box_size:            100.0                # [REQUIRED] The full simulation box size [Mpc]. Only needed for uniform volume ICs, for zooms this is read from the mask file.
 uniform_particle_number:    1331000   # [Semi-optional] Number of particles to fill the whole box at target resolution. Must be an integer cube multiple of zone1_gcell_load. If it is not specified, target_mass must be.
 target_mass:                1e10           # [Semi-optional] Desired mass of target-resolution particles; the actually used mass is generally slightly different to accommodate an integer cube number of glass files. If it is not specified, uniform_particle_number must be.
+target_mass_type:    gas               # Specifies whether `target_mass` refers to the mass of gas, dm, their mean (only if gas is identified) or dmo (only if gas is not identified). Default: gas
 
 # BARYON GENERATION #
 identify_gas:            False        # Should gas particles directly be identified in the particle load?
@@ -17,7 +18,7 @@ dm_to_gas_mass_ratio:    1.0          # [Semi-optional] If gas is to be identifi
 icgen_object_dir:      /path/to/base/dir/suite/ICs/object   # [Semi-optional] IC_Gen base directory for all ICs of this object. If it is not specified, icgen_work_dir must be.
 icgen_work_dir:        /path/to/base/dir/suite/ICs/object/sim_name    # [Semi-optional] IC_Gen working directory for these ICs. If it is not speficied, icgen_object_dir must be, the working directory is then icgen_object_dir/sim_name.
 output_formats:        Fortran       # Format(s) for writing particle loads (comma separated if multiple). Default: Fortran (required for IC_Gen); HDF5 is also possible.
-max_numpart_per_file:  64000000       # Maximum number of particles to write to a single Fortran particle load file (default: 400**3 = 64000000). Must be consistent with what IC_Gen expects.
+max_numpart_per_file:  64000000       # Maximum number of particles to write to a single Fortran particle load file. Default is 400**3 = 64000000; empirically, larger values can lead to run-time errors.
 glass_files_dir:       ./glass_files  # Directory in which the glass files are stored (default: ./glass_files). Only needed if zone1_type or zone2_type is glass.
 
 # PARTICLE LOAD DETAILS #
@@ -38,7 +39,7 @@ gcube_n_buffer_cells:       2         # Number of gcells per dimension to add be
 # HIGH-LEVEL OPTIONS FOR SETTING UP SUBSEQUENT CODES #
 generate_param_files:   True           # Auto-generate parameter files (default: True)?
 generate_submit_files:  True           # Auto-generate submit files (default: True)?
-code_types:             IC_Gen, SWIFT  # Codes to generate files for (Default: IC_Gen, SWIFT)
+code_types:             IC_Gen         # Codes to generate files for (Default and only option: IC_Gen)
 z_initial:              127.0          # [REQUIRED] Redshift to generate ICs at (only needed if param or submit files are to be generated).
 
 # OPTIONS FOR SETTING UP IC_GEN #
@@ -49,12 +50,13 @@ icgen_power_spectrum_file: None       # Name of the power spectrum file to use i
 icgen_module_setup:       ~/.module_load_icgen   # [REQUIRED] File to source in order to set up the correct environment for IC_Gen (None to not source anything). 
 icgen_num_species:        1           # Number of DM particle species that IC_Gen should generate. Default is 1 for uniform-volume sims, 2 for zooms (this is independent of gas generation).
 icgen_fft_to_gcube_ratio: 1.0         # Side length of FFT mesh in units of the gcube side length (default: 1).
-icgen_nmaxpart:           36045928    # Maximum number of particles per rank when running IC_Gen (default: 36045928).
-icgen_nmaxdisp:           791048437   # Maximum number per rank related to FFT size for IC_Gen (default: 791048437).
+icgen_nmaxpart:           36045928    # Maximum number of particles per rank allowed by IC_Gen (default: 36045928).
+icgen_nmaxdisp:           791048437   # Maximum number of displacement entries allowed by IC_Gen (default: 791048437).
 icgen_use_PH_IDs:         True        # Assign Particle IDs based on Peano-Hilbert index (default: True)?
 icgen_PH_nbit:            21          # Depth of Peano-Hilbert grid for assigning particle IDs (default: 21).
 fft_min_Nyquist_factor:   2           # Minimum size of FFT mesh in units of the (uniform-equivalent) number of particles per dimension (default: 2).
 fft_n_base:               3           # Base factor for FFT grid size; FFT grid is a power of two times this number. Must be consistent with what was used to calculate Panphasian descriptor (default: 3).
+fft_n_min:                1536        # Minimum FFT grid size, irrespective of particle number (default: 1536).
 icgen_multigrid:          True        # For zoom ICs, should IC_Gen use multi-grid FFT? Default: True.
 icgen_runtime_hours:      4           # Runtime in hours to request for IC_Gen job (default: 4).
 icgen_num_constraints:    0           # Number of phase constraints for constrained realisation ICs (default: 0, unconstrained).
@@ -64,20 +66,6 @@ icgen_constraint_phase_descriptor_path: '%dummy' # Constraint phase descriptor p
 icgen_constraint_phase_descriptor2:   '%dummy'   # Second phase descriptor string for constrained-realisation ICs (only meaningful if icgen_num_constraints > 1).
 icgen_constraint_phase_descriptor2_levels: '%dummy' # Second constraint phase descriptor levels (only meaningful if icgen_num_constraints > 1).
 icgen_constraint_phase_descriptor2_path: '%dummy' # Second constraint phase descriptor path (only meaningful if icgen_num_constraints > 1).
-
-# OPTIONS FOR SETTING UP SIMULATION RUNS #
-z_final:               0.0               # Redshift to which the simulation should run (default: 0).
-comoving_eps_ratio:    0.05              # Co-moving softening length in units of the mean inter-particle separation (default: 0.05).
-proper_eps_ratio:      0.022222          # Maximum proper softening length in units of the mean inter-particle separation at z = 0 (default: 1/45).
-background_eps_ratio:  0.02              # Co-moving softening length of tidal particles in units of their mean inter-particle separation (default: 0.02).
-
-# OPTIONS FOR SETTING UP SWIFT RUNS #
-swift_run_dir:         /path/to/base/dir/suite/sim_name   # [REQUIRED]Base directory of SWIFT run.
-swift_num_nodes:       1                     # [REQUIRED] Number of nodes to use for SWIFT run.
-swift_runtime_hours:   72                    # [REQUIRED] Run time for SWIFT job in hours.
-swift_ics_dir:         /path/to/base/dir/suite/ICs/  # [REQUIRED] Directory containing final ICs in SWIFT-compatible format.
-swift_exec:            ../swiftsim/examples/swift    # [REQUIRED] Location of SWIFT executable, either absolute or relative to swift_run_dir.
-swift_module_setup:   ~/.module_load_swift   # [REQUIRED] File to source in order to set up the correct environment for SWIFT (None to not source anything).
 
 # PARAMETERS FOR TARGET SYSTEM #
 slurm_partition:        partition      # [REQUIRED] Name of the partition to use for SLURM job sumbission.

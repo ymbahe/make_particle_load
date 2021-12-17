@@ -291,6 +291,7 @@ class ParticleLoad:
             'icgen_PH_nbit': 21,
             'fft_min_Nyquist_factor': 2.0,
             'fft_n_base': 3,
+            'fft_n_min': 1536,
             'icgen_multigrid': True,
             'panphasian_descriptor': None,
             'icgen_num_constraints': 0,
@@ -2347,8 +2348,9 @@ class ParticleLoad:
         # particles per dimension
         f_Nyquist = self.extra_params['fft_min_Nyquist_factor']
         n_fft_base = self.extra_params['fft_n_base']
+        n_fft_min = self.extra_params['fft_n_min']
         
-        n_fft_required = (n_part * f_Nyquist)
+        n_fft_required = max((n_part * f_Nyquist), n_fft_min)
 
         pow2 = int(np.ceil(np.log(n_fft_required / n_fft_base) / np.log(2)))
         n_fft = n_fft_base * 2**pow2
