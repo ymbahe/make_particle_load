@@ -103,7 +103,7 @@ class MakeMask:
         # Parse the parameter file, check for consistency, and determine
         # the centre and radius of high-res sphere around a VR halo if desired.
         self.read_param_file(param_file, params)
-
+        
         # Create the actual mask...
         self.make_mask()
 
@@ -149,7 +149,8 @@ class MakeMask:
             self.params['topology_fill_holes'] = True
             self.params['topology_dilation_niter'] = 0
             self.params['topology_closing_niter'] = 0
-
+            self.params['padding_snaps'] = None
+            
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
             required_params = [
@@ -228,7 +229,20 @@ class MakeMask:
                 self.params['fname'].replace('$vr', f'{vr_index}'))
             self.params['output_dir'] = (
                 self.params['output_dir'].replace('$vr', f'{vr_index}'))
-            
+
+            # Parse padding options, if provided
+            if self.params['padding_snaps'] is not None:
+                pad_snaps = self.params['padding_snaps'].split()
+                if len(pad_snaps) == 1:
+                    self.params['padding_snaps'] = np.array([pad_snaps[0]])
+                else:
+                    pad_start = pad_snaps[0]
+                    pad_end = pad_snaps[1]
+                    if len(pad_snaps) == 2:
+                        pad_space = 1
+                    self.params['padding_snaps'] = np.arange(
+                        pad_start, pad_end+1, pad_space)
+                    
             # Convert coordinates and cuboid/slab dimensions to ndarray
             self.params['centre'] = np.array(self.params['centre'], dtype='f8')
             if 'dim' in self.params:
@@ -237,7 +251,7 @@ class MakeMask:
             # Create the output directory if it does not exist yet
             if not os.path.isdir(self.params['output_dir']):
                 os.makedirs(self.params['output_dir'])
-
+                
         else:
             # If this is not the root rank, don't read the file.
             self.params = None
@@ -422,8 +436,13 @@ class MakeMask:
         # Load IDs of particles within target high-res region from snapshot.
         # Note that only particles assigned to current MPI rank are loaded,
         # which may be none.
-        ids = self.load_particles()
+        primary_ids = self.load_primary_ids()
 
+        # Identify mask particles. This includes all primary particles, but
+        # also those that need to be included in the high-resolution region
+        # to keep the primary particles well padded.
+        mask_ids = self.load_mask_ids()
+        
         # Find initial positions from particle IDs (recall that these are
         # really Peano-Hilbert indices). Coordinates are in the same units
         # as the box size, centred (and wrapped) on the high-res target region.
@@ -561,17 +580,17 @@ class MakeMask:
             )
         return frame
 
-    def load_particles(self):
+    def load_primary_ids(self):
         """
-        Load relevant data from base snapshot.
+        Load IDs of particles in specified high-res region.
 
-        In addition to particle IDs and coordinates, relevant metadata are
-        also loaded and stored in the `self.params` dict.
+        In addition, relevant metadata are loaded and stored in the
+        `self.params` dict.
 
         Returns
         -------
         ids : ndarray(int)
-            The Peano-Hilbert keys of the particles.
+            The particle IDs of the primary particles.
 
         """
         # To make life simpler, extractsome frequently used parameters
@@ -647,7 +666,28 @@ class MakeMask:
         print(f'[Rank {comm_rank}] Loaded {len(ids)} dark matter particles')
 
         return ids
+    
+    def load_mask_ids(self, primary_ids) -> np.ndarray:
+        """
+        Find the IDs of all particles that must be included in the mask.
 
+        This includes the primary particles, and in addition all those that
+        are close enough to them that they would affect the target region.
+        Padding particles can be identified in multiple snapshots.
+
+        Parameters
+        ----------
+        primary_ids : ndarray(int)
+            The IDs of primary particles.
+
+        Returns
+        -------
+        mask_ids : ndarray(int)
+            The (unique) IDs of all particles to be included in the mask.
+
+        """
+        pass
+        
     def compute_ic_positions(self, ids) -> np.ndarray:
         """
         Compute the particle positions in the ICs.
