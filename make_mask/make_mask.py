@@ -312,6 +312,9 @@ class MakeMask:
                 raise ValueError(
                     f"Invalid radius of high-res region ({r_highres})")
 
+            # Store unpadded high-res readius
+            self.params['primary_highres_radius'] = r_highres
+            
             # If enabled, add a fixed "padding" radius to the high-res sphere
             if self.params['highres_radius_padding'] > 0:
                 r_highres += self.params['highres_radius_padding']
@@ -436,12 +439,13 @@ class MakeMask:
         # Load IDs of particles within target high-res region from snapshot.
         # Note that only particles assigned to current MPI rank are loaded,
         # which may be none.
-        primary_ids = self.load_primary_ids()
+        primary_ids, mask_ids = self.load_primary_ids()
 
         # Identify mask particles. This includes all primary particles, but
         # also those that need to be included in the high-resolution region
         # to keep the primary particles well padded.
-        mask_ids = self.load_mask_ids()
+        if self.params['padding_snaps'] is not None:
+            mask_ids = self.load_mask_ids(primary_ids)
         
         # Find initial positions from particle IDs (recall that these are
         # really Peano-Hilbert indices). Coordinates are in the same units
@@ -591,9 +595,12 @@ class MakeMask:
         -------
         ids : ndarray(int)
             The particle IDs of the primary particles.
+        ids_all : ndarray(int)
+            The IDs of all particles to be treated as high-res, including
+            ones that are only included for padding.
 
         """
-        # To make life simpler, extractsome frequently used parameters
+        # To make life simpler, extract some frequently used parameters
         cen = self.params['centre']
         shape = self.params['shape']
 
@@ -622,22 +629,23 @@ class MakeMask:
         coords = snap.read_dataset(1, 'Coordinates')
 
         # Shift coordinates relative to target centre, and wrap them to within
-        # the periodic box (done by first shifting them up by half a box,
-        # taking the modulus with the box size in each dimension, and then
-        # shifting it back down by half a box)
+        # the periodic box
         cen = self.params['centre']
         coords -= cen
         periodic_wrapping(coords, self.params['box_size'])
 
         # Select particles within target region
         l_unit = self.params['length_unit']
+        ind_primary = None
         if shape == 'sphere':
             if comm_rank == 0:
                 print(f"Clipping to sphere around {cen}, with radius "
                       f"{self.params['radius']:.4f} {l_unit}")
 
             dists = np.linalg.norm(coords, axis=1)
-            mask = np.where(dists <= self.params['radius'])[0]
+            ind_sel = np.where(dists <= self.params['radius'])[0]
+            ind_primary = np.nonzero(
+                dists <= self.params['primary_highres_radius'])[0]
 
         elif self.params['shape'] in ['cuboid', 'slab']:
             if comm_rank == 0:
@@ -651,21 +659,22 @@ class MakeMask:
             # offset by the maximum allowed extent in the corresponding
             # dimension, and find those where the result is between -1 and 1
             # for all three dimensions
-            mask = np.where(
+            ind_sel = np.where(
                 np.max(np.abs(coords / (self.params['dim'] / 2)), axis=1)
                 <= 1)[0]
+            ind_primary = np.copy(ind_sel)
 
-        # Secondly, we need the IDs of particles lying in the mask region
-        ids = snap.read_dataset(1, 'ParticleIDs')[mask]
+        # We need the IDs of particles lying in the mask region
+        ids = snap.read_dataset(1, 'ParticleIDs')
 
         # If IDs are Peano-Hilbert indices multiplied by two (as in e.g.
         # simulations with baryons), need to undo this multiplication here
         if self.params['divide_ids_by_two']:
-            ids = ids // 2
+            ids //= 2
 
         print(f'[Rank {comm_rank}] Loaded {len(ids)} dark matter particles')
 
-        return ids
+        return ids[ind_primary], ids[ind_sel]
     
     def load_mask_ids(self, primary_ids) -> np.ndarray:
         """
