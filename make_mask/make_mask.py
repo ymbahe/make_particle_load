@@ -155,6 +155,7 @@ class MakeMask:
             required_params = [
                 'fname',
                 'snap_file',
+                'ids_are_ph',
                 'bits',
                 'data_type',
                 'divide_ids_by_two',
@@ -390,7 +391,8 @@ class MakeMask:
 
         # Store mass of target halo used for sorting, for later use
         setattr(self, sort_type, m_halo[halo_index])
-        return halo_index
+
+        return field_halos[halo_index]
 
     def make_mask(self, padding_factor=2.0):
         """
@@ -656,8 +658,9 @@ class MakeMask:
         Parameters
         ----------
         ids : ndarray(int)
-            The Particle IDs (more specifically: Peano-Hilbert keys) for which
-            to calculate IC coordinates.
+            The Particle IDs for which to calculate IC coordinates. If they
+            are not Peano-Hilbert indices themselves, these are retrieved
+            fro the ICs file.
 
         Returns
         -------
@@ -669,6 +672,13 @@ class MakeMask:
         print(f"[Rank {comm_rank}] Computing initial positions of dark matter "
               "particles...")
 
+        if not self.params['ids_are_ph']:
+            print("Translating particle IDs to PH IDs...", end='', flush=True)
+            with h5py.File(self.params['ics_file'], 'r') as f:
+                ph_ids = f['PartType1/ParticleIDs'][...]
+                ids = ph_ids[ids]
+            print(" done.")
+        
         # First, convert the (scalar) PH key for each particle back to a triple
         # of indices giving its (quantised, normalized) offset from the origin
         # in x, y, z. This must use the same grid (bits value) as was used
