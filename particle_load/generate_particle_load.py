@@ -283,8 +283,8 @@ class ParticleLoad:
             'icgen_module_setup': None,
             'icgen_num_species': None,
             'icgen_fft_to_gcube_ratio': 1.0,
-            'icgen_nmaxpart': 36045928,
-            'icgen_nmaxdisp': 791048437,
+            'icgen_nmaxpart': 46656000,   # 'C7mem' build of IC_Gen
+            'icgen_nmaxdisp': 454164480,  # 'C7mem' build of IC_Gen
             'icgen_runtime_hours': 4,
             'icgen_power_spectrum_file': None,
             'icgen_use_PH_IDs': True,
@@ -2384,8 +2384,8 @@ class ParticleLoad:
 
         # Apply a safety margin around the maximum values allowed by IC-Gen.
         # This might help prevent 'STATE' errors...
-        num_max_part = int(self.extra_params['icgen_nmaxpart'] * 0.95)
-        num_max_disp = int(self.extra_params['icgen_nmaxdisp'] * 0.95)
+        num_max_part = int(self.extra_params['icgen_nmaxpart'])
+        num_max_disp = int(self.extra_params['icgen_nmaxdisp'])
 
         n_dim_fft = fft_params['n_mesh']
         num_cores_per_node = self.extra_params['num_cores_per_node']
