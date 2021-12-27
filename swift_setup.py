@@ -11,9 +11,6 @@ from local import local
 
 from pdb import set_trace
 
-
-# TODO: update N_Part_Equiv to reflect DM particles only when in dual mode.
-
 def main():
     """Set up SWIFT run."""
     args = parse_arguments()
@@ -33,7 +30,9 @@ def main():
     # Adapt (re-/)submit scripts
     generate_submit_scripts(params, args)
 
-
+    # Adapt post-processing script
+    generate_postprocessing_scripts(params, args)
+    
 def parse_arguments():
     """Parse the command-line arguments."""
 
@@ -59,9 +58,13 @@ def parse_arguments():
     parser.add_argument(
         '-vr', action='store_true', help='Run with VR on the fly?')
     parser.add_argument(
+        '-vrx', action='store_true', help='Post-process with VR?')
+
+    parser.add_argument(
         '-t', '--sim_type', default='dmo',
         help="Type of simulation to run: DMO [default], EAGLE, or COLIBRE."
     )
+
     parser.add_argument(
         '-g', '--swift_gas', action='store_true',
         help='Split off gas within SWIFT (default: no).'
@@ -78,6 +81,11 @@ def parse_arguments():
     parser.add_argument(
         '-r', '--run_time', type=float, default=72,
         help="Job run time [hours]. SWIFT will stop half an hour earlier.")
+    parser.add_argument(
+        '--vr_run_time', type=float, default=5,
+        help="Job run time for VR post-processing [hours]. Only relevant "
+             "if -vrx is selected."
+    )
     parser.add_argument(
         '-x', '--exec_dir', default='../../swiftsim/builds/std_vr',
         help="Directory containing the SWIFT executable, either absolute or "
@@ -103,6 +111,7 @@ def parse_arguments():
         help='Directory containing SWIFT tables for EAGLE-like runs '
              '(default: ../..).'
     )
+    
     
     args = parser.parse_args()
     if args.ics_file is None:
@@ -130,6 +139,9 @@ def parse_arguments():
     if args.run_time < 0.5:
         print(f"Overriding input run time to 0.6 hours.")
         args.run_time = 0.6
+
+    if args.vrx:
+        args.run_vr_template = './swift_templates/run_vr_template.sh'
         
     return args
 
@@ -317,7 +329,12 @@ def generate_param_file(data, args):
     ics = params['InitialConditions']
     ics['file_name'] = args.ics_file
     ics['cleanup_h_factors'] = 1 if data['ics_contain_h_factors'] else 0
-    ics['generate_gas_in_ics'] = 1 if args.swift_gas else 0
+    if args.swift_gas:
+        ics['generate_gas_in_ics'] = 1
+        ics['cleanup_smoothing_lengths'] = 1
+    else:
+        ics['generate_gas_in_ics'] = 0
+        ics['cleanup_smoothing_lengths'] = 0
 
     if args.sim_type in ['eagle', 'colibre']:
         params['SPH']['particle_splitting_mass_threshold'] = float(m_gas * 4)
@@ -363,8 +380,21 @@ def generate_submit_scripts(data, args):
     data['swift_flags'] += ' --restart'
     make_custom_copy(args.slurm_template, resubmit_file, data, executable=True)
     copy('./swift_templates/auto_resubmit', args.run_dir)
-        
 
+    
+def generate_postprocessing_scripts(data, args):
+    """Adapt and write scripts for post-processing."""
+
+    if args.vrx:
+        vr_template_file = f"{args.run_dir}/run_vr_template.sh"
+
+        param_dict = {
+            'vr_time_string': get_time_string(args.vr_run_time),
+            'sim_name': data['sim_name'],
+        }
+        make_custom_copy(args.run_vr_template, vr_template_file, param_dict) 
+    
+    
 def compute_top_level_cells(data):
     """
     Compute the optimal number of top-level cells per dimension.
