@@ -194,7 +194,9 @@ def get_ic_metadata(args):
     
         data['m_pt1'] = f['PartType1']['Masses'][0] / data['HubbleParam']
         print(f"Read PT1 mass as {data['m_pt1']}")
-            
+
+        data['is_zoom'] = h.attrs['NumPart_Total'][2] > 0
+
     set_default(data, 'dm_to_baryon_mass_ratio',
                 data['OmegaDM'] / data['OmegaBaryon'])
     set_default(data, 'ics_contain_h_factors', 1)
@@ -276,8 +278,11 @@ def set_up_rundir(args, params):
     if args.sim_type in ['dmo', 'sibelius']:
         copy('./swift_templates/vrconfig_dmo.cfg',
              run_dir + '/vrconfig.cfg')
-    else:
+    elif params['is_zoom']:
         copy('./swift_templates/vrconfig.cfg', run_dir)
+    else:
+        copy('./swift_templates/vrconfig_uniform.cfg',
+             run_dir + '/vrconfig.cfg')
     copy(args.exec_dir + '/' + params['swift_exec'], run_dir)
     if not os.path.isdir(run_dir + '/logs'):
         os.makedirs(run_dir + '/logs')
