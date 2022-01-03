@@ -92,7 +92,7 @@ Restarts:
   delta_hours:  2.0
   max_run_time: 71.5                 # Three days minus fergie time
   resubmit_on_exit:   1
-  resubmit_command:   ./resub.sh
+  resubmit_command:   ./auto_resubmit
 
 # Parameters related to the initial conditions
 InitialConditions:
