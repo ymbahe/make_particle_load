@@ -2,6 +2,7 @@
 
 #SBATCH --ntasks 48 # The number of cores you need...
 #SBATCH -J VR_${sim_name}_XXX-SNAP-STRING-XXX #Give it something meaningful.
+#SBATCH --mem=${slurm_memory}
 #SBATCH -o logs/vr.%J.out
 #SBATCH -e logs/vr.%J.err
 #SBATCH -p altair
