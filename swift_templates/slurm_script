@@ -2,6 +2,7 @@
 
 #SBATCH --nodes=$slurm_num_nodes
 #SBATCH --tasks-per-node=$slurm_ntasks_per_node
+#SBATCH --mem=$slurm_memory
 #SBATCH -J SWI-$sim_name
 #SBATCH -o ./logs/swift.%J.out
 #SBATCH -e ./logs/swift.%J.err
