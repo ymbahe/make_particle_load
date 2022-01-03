@@ -20,9 +20,9 @@ def main():
 
     # Add additional required parameters
     params = compile_params(ic_metadata, args)
-    
+
     # Set up run directory
-    set_up_rundir(args)
+    set_up_rundir(args, params)
 
     # Adapt and write simulation parameter file
     generate_param_file(params, args)
@@ -58,8 +58,9 @@ def parse_arguments():
     parser.add_argument(
         '-vr', action='store_true', help='Run with VR on the fly?')
     parser.add_argument(
-        '-vrx', action='store_true', help='Post-process with VR?')
-
+        '-vrx', help='Directory containing VR executable, if VR is to be '
+        'run in post-processing.'
+    )
     parser.add_argument(
         '-t', '--sim_type', default='dmo',
         help="Type of simulation to run: DMO [default], EAGLE, or COLIBRE."
@@ -78,6 +79,13 @@ def parse_arguments():
         '-n', '--num_nodes', type=int, default=1,
         help="Number of nodes on which to run (default: 1)."
     )
+    parser.add_argument(
+        '--mem', type=int,
+        help='Memory to request from SLURM [GB], optional (default: 0, use all)'
+    )
+    parser.add_argument(
+        '--max_nmesh', type=int,
+        help="Maximum number of gravity mesh cells per dimension.")
     parser.add_argument(
         '-r', '--run_time', type=float, default=72,
         help="Job run time [hours]. SWIFT will stop half an hour earlier.")
@@ -140,8 +148,9 @@ def parse_arguments():
         print(f"Overriding input run time to 0.6 hours.")
         args.run_time = 0.6
 
-    if args.vrx:
+    if args.vrx is not None:
         args.run_vr_template = './swift_templates/run_vr_template.sh'
+        args.postprocess_file = './swift_templates/postprocess.sh'
         
     return args
 
@@ -159,7 +168,8 @@ def get_ic_metadata(args):
         h = f['Header']
         data['HubbleParam'] = h.attrs['HubbleParam']
         data['AExp_ICs'] = h.attrs['Time']
-
+        data['NumPart'] = h.attrs['NumPart_Total']
+        
         # We need the box size to find the mean inter-particle separation
         # and hence softening --> take out h factor
         data['BoxSize'] = h.attrs['BoxSize'] / data['HubbleParam']
@@ -216,6 +226,7 @@ def compile_params(ic_data, args):
 
     params['slurm_num_nodes'] = args.num_nodes
     params['slurm_ntasks_per_node'] = 1 if args.num_nodes == 1 else 2
+    params['slurm_memory'] = 0 if args.mem is None else f'{args.mem}G'
     params['sim_name'] = args.sim_name
     params['slurm_partition'] = local['slurm_partition']
     params['slurm_account'] = local['slurm_account']
@@ -233,7 +244,8 @@ def compile_params(ic_data, args):
         params['slurm_mpi_command'] = f'mpirun -np $$SLURM_NTASKS'
         swift_exec = 'swift_mpi'
         params['threads_per_task'] = int(local['cpus_per_node'] / 2)
-    params['swift_exec'] = args.exec_dir + '/' + swift_exec
+
+    params['swift_exec'] = './' + swift_exec
 
     if args.sim_type in ['dmo', 'sibelius']:
         params['swift_flags'] = '--self-gravity'
@@ -251,14 +263,22 @@ def compile_params(ic_data, args):
        
     return params
         
-def set_up_rundir(args):
+def set_up_rundir(args, params):
     """Set up the base directory for the SWIFT run."""
     run_dir = args.run_dir
     if not os.path.isdir(run_dir):
         os.makedirs(run_dir)
 
+    if args.vrx is not None and not os.path.isdir(run_dir + '/logs'):
+        os.makedirs(run_dir + '/vr')
+        
     copy(args.output_time_file, f"{run_dir}/output_times.dat")
-    copy('./swift_templates/vrconfig.cfg', run_dir)
+    if args.sim_type in ['dmo', 'sibelius']:
+        copy('./swift_templates/vrconfig_dmo.cfg',
+             run_dir + '/vrconfig.cfg')
+    else:
+        copy('./swift_templates/vrconfig.cfg', run_dir)
+    copy(args.exec_dir + '/' + params['swift_exec'], run_dir)
     if not os.path.isdir(run_dir + '/logs'):
         os.makedirs(run_dir + '/logs')
 
@@ -286,6 +306,10 @@ def generate_param_file(data, args):
         data['swift_flags'] += ' --velociraptor'
     else:
         params['Snapshots']['invoke_stf'] = 0
+
+    if args.vrx is not None:
+        params['Snapshots']['run_on_dump'] = 1
+        params['Snapshots']['dump_command'] = 'postprocess.sh'
         
     params['Restarts']['max_run_time'] = args.run_time - 0.5
 
@@ -323,19 +347,29 @@ def generate_param_file(data, args):
         gravity['max_physical_DM_softening'] = mean_ips * f_dm * (1/50)
         
     gravity['mesh_side_length'] = compute_mesh_side_length(data)
-    if gravity['mesh_side_length'] > 1290:
+    if gravity['mesh_side_length'] > 1290 and args.num_nodes > 1:
         gravity['distributed_mesh'] = 1
+    else:
+        gravity['distributed_mesh'] = 0
     
+    # Make sure that we don't have too big a mesh
+    if gravity['distributed_mesh'] == 0:
+        gravity['mesh_side_length'] = min(gravity['mesh_side_length'], 1024)
+    if args.max_nmesh is not None:
+        gravity['mesh_side_length'] = min(
+            gravity['mesh_side_length'], args.max_nmesh)
+
     ics = params['InitialConditions']
     ics['file_name'] = args.ics_file
     ics['cleanup_h_factors'] = 1 if data['ics_contain_h_factors'] else 0
-    if args.swift_gas:
-        ics['generate_gas_in_ics'] = 1
-        ics['cleanup_smoothing_lengths'] = 1
-    else:
-        ics['generate_gas_in_ics'] = 0
-        ics['cleanup_smoothing_lengths'] = 0
+    ics['generate_gas_in_ics'] = 1 if args.swift_gas else 0
 
+    # Need to clean up smoothing lengths even if gas is already in ICs
+    if args.sim_type in ['dmo', 'sibelius']:
+        ics['cleanup_smoothing_lengths'] = 0
+    else:
+        ics['cleanup_smoothing_lengths'] = 1        
+        
     if args.sim_type in ['eagle', 'colibre']:
         params['SPH']['particle_splitting_mass_threshold'] = float(m_gas * 4)
         print(f"Set splitting threshold to {m_gas * 4}")
@@ -385,15 +419,17 @@ def generate_submit_scripts(data, args):
 def generate_postprocessing_scripts(data, args):
     """Adapt and write scripts for post-processing."""
 
-    if args.vrx:
+    if args.vrx is not None:
         vr_template_file = f"{args.run_dir}/run_vr_template.sh"
 
         param_dict = {
             'vr_time_string': get_time_string(args.vr_run_time),
             'sim_name': data['sim_name'],
+            'slurm_memory': data['slurm_memory'],
         }
         make_custom_copy(args.run_vr_template, vr_template_file, param_dict) 
-    
+        copy(args.postprocess_file, args.run_dir)
+        copy(args.vrx + '/stf', args.run_dir)
     
 def compute_top_level_cells(data):
     """
@@ -403,7 +439,9 @@ def compute_top_level_cells(data):
     Might need to refine this for e.g. zooms...
     
     """
-    n_eq = data['N_Part_Equiv']
+    n_eq = np.cbrt(np.sum(data['NumPart'][:2]))
+    print(f"Particle number: {n_eq:.2f}^3")
+    
     ncells = int(np.rint(n_eq / 376 * 16))
     return max(3, ncells)
 
