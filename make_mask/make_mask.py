@@ -149,7 +149,8 @@ class MakeMask:
             self.params['topology_fill_holes'] = True
             self.params['topology_dilation_niter'] = 0
             self.params['topology_closing_niter'] = 0
-
+            self.params['phid_name'] = 'PeanoHilbertIDs'
+            
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
             required_params = [
@@ -679,7 +680,7 @@ class MakeMask:
         if not self.params['ids_are_ph']:
             print("Translating particle IDs to PH IDs...", end='', flush=True)
             with h5py.File(self.params['ics_file'], 'r') as f:
-                ics_ph_ids = f['PartType1/PeanoHilbertIDs'][...]
+                ics_ph_ids = f[f"PartType1/{self.params['phid_name']}"][...]
                 ids = ics_ph_ids[ids-1]
 
             print(" done.")
