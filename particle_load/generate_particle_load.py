@@ -521,7 +521,8 @@ class ParticleLoad:
                     f['Coordinates'].attrs.get("bounding_length")) / lbox_mpc
                 mask_data['high_res_volume'] = (
                     f['Coordinates'].attrs.get("high_res_volume")
-                    / lbox_mpc**3)
+                    / lbox_mpc**3
+                )
 
         else:
             mask_data = None
@@ -1429,7 +1430,7 @@ class ParticleLoad:
             np_target = (self.sim_box['num_part_equiv'] *
                          self.mask_data['high_res_volume'])
             print(
-                f"--- Target number of particles: "
+                f"--- Cosmic mean number of particles in selection region: "
                 f"{np_target:.2e} ({np_target**(1/3):.2f}^3, "
                 f"{np_target / np_tot * 100:.2f} % of actual total.)"
             )
