@@ -12,6 +12,7 @@ from mpi4py import MPI
 import parallel_functions as pf
 from scipy.io import FortranFile
 import time
+import kernel_replications as kr
 
 # Append modules directory to PYTHONPATH
 sys.path.append(
@@ -1511,10 +1512,18 @@ class ParticleLoad:
                     self.gcell_info['zone1_m_gas'] = -1
                     self.gcell_info['zone1_gas_mips_mpc'] = -1
             else:
-                # We assign gas particles right here
-                kernel_masses, mass_ptypes = self.identify_gas(gcell_load_type)
-                self.gcell_info['zone1_m_dm'] = mass_ptypes['dm']
-                self.gcell_info['zone1_m_gas'] = mass_ptypes['gas']
+                if self.config['regular_dm_oversampling_factor'] is None:
+                    # We assign gas particles right here
+                    kernel_masses, mass_ptypes = self.identify_gas(
+                        gcell_load_type)
+                    self.gcell_info['zone1_m_dm'] = mass_ptypes['dm']
+                    self.gcell_info['zone1_m_gas'] = mass_ptypes['gas']
+                else:
+                    # Replicate the kernel structure a given number of times,
+                    # and assign gas/DM status to the replications
+                    # (analogous to Richings et al. 2021).
+                    # N.B.: this updates `kernel` as well.
+                    kernel_masses, mass_ptypes = self.replicate_kernel(kernel)
 
                 # Mean gas inter-particle separation (for metadata file)
                 num_gas = np.count_nonzero(kernel_masses == mass_ptypes['gas'])
@@ -1669,6 +1678,111 @@ class ParticleLoad:
         kernel_masses = np.zeros(num_tot)
         kernel_masses[ind_dm] = m_dm
         kernel_masses[ind_gas] = m_gas
+
+        return kernel_masses, {'dm': m_dm, 'gas': m_gas}
+
+    def replicate_kernel(self, kernel, num_rep, scheme):
+        """
+        Replicate a kernel a given number of times and assign particle types.
+
+        The original particle positions must be in the range [-0.5, 0.5].
+        Each replication is offset by a certain amount from the original,
+        details depending on the replication number and specified scheme.
+
+        Parameters
+        ----------
+        kernel : ndarray(float)
+            The coordinates of the original particles. This is updated and
+            will also contain the replications upon return.
+        num_rep : int
+            The number of replications to be generated.
+        scheme : string, optional
+            Specification of where the replications should be positioned
+            relative to the original particles. [TO BE CONTINUED]
+
+        Returns
+        -------
+        kernel_masses : ndarray(float)
+            The masses (in units of the total simulation mass) of each kernel
+            particle including replications.
+        mass_ptypes : dict
+            The masses for 'gas' and 'dm' particles, respectively (under these
+            keys).
+
+        """
+        num_orig = kernel.shape[0]
+        num_final = int(num_orig * num_rep)
+
+        ind_gas = np.arange(num_orig)
+        ind_dm = np.arange(num_orig, num_final)
+
+        # Find total mass in DM and baryons in a gcell
+        f_m_baryon = self.cosmo['OmegaBaryon'] / self.cosmo['Omega0']
+        f_m_dm = 1.0 - f_m_baryon
+        m_gcell_tot = self.gcube['cell_size']**3
+        m_gcell_gas = m_gcell_tot * f_m_baryon
+        m_gcell_dm = m_gcell_tot * f_m_dm
+
+        # Calculate gas and DM particle numbers, depending on setting
+        dm_num_factor = num_rep
+        num_frac_dm = dm_num_factor / (1 + dm_num_factor)
+        num_dm = int(num_orig * dm_num_factor)
+        num_gas = num_orig
+
+        m_dm = m_gcell_dm / num_dm
+        m_gas = m_gcell_gas / num_gas
+
+        if comm_rank == 0:
+            m_to_msun = self.sim_box['mass_msun']
+            print(
+                f"Zone I: m_dm =  {m_dm:.5e} ({m_dm * m_to_msun:.5e} M_Sun),\n"
+                f"        m_gas = {m_gas:.5e} ({m_gas * m_to_msun:.5e} M_Sun)"
+                f"\n        N_DM = {num_dm}, N_gas = {num_gas}, "
+                f"N_DM / N_gas = {num_dm / num_gas:.2f}."
+            )
+
+        kernel_masses = np.zeros(num_final)
+        kernel_masses[ind_dm] = m_dm
+        kernel_masses[ind_gas] = m_gas
+
+        # That was the easy part, now replicate the particles...
+
+        # First, make space (use -1 as filler value)
+        kernel.resize(num_final, 3)
+        kernel[num_orig:num_final, ...] = -1
+
+        # To calculate the replication shifts, we need the mean inter-particle
+        # separation in the kernel (in units of the gcell)
+        ips = 1.0 / np.cbrt(num_orig)
+
+        # Since each replication scheme is different, outsource them each
+        # to their own function...
+        if num_rep == 1:
+            kr.replicate_kernel_bcc(kernel, ips, num_orig)
+        elif num_rep == 4:
+            if scheme in [None, 'face']:
+                kr.replicate_kernel_n4_faces(kernel, ips, num_orig)
+            elif scheme in [None, 'edge']:
+                kr.replicate_kernel_n4_edges(kernel, ips, num_orig)
+            elif scheme == 'square':
+                kr.replicate_kernel_subsquare(kernel, ips, num_orig)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
+        elif num_rep == 5:
+            if scheme in [None, 'octahedron']:
+                kr.replicate_kernel_octahedron(kernel, ips, num_orig)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
+        elif num_rep == 7:
+            if scheme in [None, 'subcube']:
+                kr.replicate_kernel_subcube(kernel, ips, num_orig)
+            elif scheme == 'diamond':
+                kr.replicate_kernel_diamond(kernel, ips, num_orig)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
 
         return kernel_masses, {'dm': m_dm, 'gas': m_gas}
 
