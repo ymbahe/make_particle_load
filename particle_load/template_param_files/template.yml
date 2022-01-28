@@ -2,17 +2,19 @@
 # See also template_zoom and template_uniform for templates specifically adapted to zoom and uniform-volume simulations, respectively.
 
 # MAIN PARTICLE LOAD PARAMETERS #
-sim_name:            my_ics               # [REQUIRED] A label for the ICs, used amongst others as the base name for ICs files.
-cosmology:           Planck2018           # [REQUIRED] The cosmology to be used by IC_Gen and (if enabled) written to the simulation parameter file. Must be one of 'Planck2013' or 'Planck2018'.
-box_size:            100.0                # [REQUIRED] The full simulation box size [Mpc]. Only needed for uniform volume ICs, for zooms this is read from the mask file.
-uniform_particle_number:    1331000   # [Semi-optional] Number of particles to fill the whole box at target resolution. Must be an integer cube multiple of zone1_gcell_load. If it is not specified, target_mass must be.
-target_mass:                1e10           # [Semi-optional] Desired mass of target-resolution particles; the actually used mass is generally slightly different to accommodate an integer cube number of glass files. If it is not specified, uniform_particle_number must be.
-target_mass_type:    gas               # Specifies whether `target_mass` refers to the mass of gas, dm, their mean (only if gas is identified) or dmo (only if gas is not identified). Default: gas
+sim_name:                 my_ics        # [REQUIRED] A label for the ICs, used amongst others as the base name for ICs files.
+cosmology:                Planck2018    # [REQUIRED] The cosmology to be used by IC_Gen and (if enabled) written to the simulation parameter file. Must be one of 'Planck2013' or 'Planck2018'.
+box_size:                 100.0         # [REQUIRED] The full simulation box size [Mpc]. Only needed for uniform volume ICs, for zooms this is read from the mask file.
+uniform_particle_number:  1331000       # [Semi-optional] Number of particles to fill the whole box at target resolution. Must be an integer cube multiple of zone1_gcell_load. If it is not specified, target_mass must be.
+target_mass:                1e10        # [Semi-optional] Desired mass of target-resolution particles; the actually used mass is generally slightly different to accommodate an integer cube number of glass files. If it is not specified, uniform_particle_number must be.
+target_mass_type:           gas         # Specifies whether `target_mass` refers to the mass of 'gas', 'dm', their 'mean' (only if gas is identified) or 'dmo' (only if gas is not identified). Default: gas
 
 # BARYON GENERATION #
-identify_gas:            False        # Should gas particles directly be identified in the particle load?
-dm_to_gas_number_ratio:  None         # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle numbers? If not specified (or None), dm_to_gas_mass_ratio must be.
-dm_to_gas_mass_ratio:    1.0          # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle masses? If not spefified (or None), dm_to_gas_number_ratio must be.    
+identify_gas:                 False     # Should gas particles directly be identified in the particle load?
+generate_extra_dm_particles:  False     # Should extra DM particles be generated instead of assigning subsets of grid/glass particles as DM and gas (default: False)? Only relevant if `identify_gas` is True.
+extra_dm_particle_scheme:     None      # Scheme to place extra DM particles relative to their "parent" gas particles in case of ambiguity (default: None, use defaults based on `dm_to_gas_number_ratio`). Options are 'face' (default) or 'edge' [N = 3, 4]; 'square' [N = 4]; 'subcube' (default) or 'diamond' [N = 7].  
+dm_to_gas_number_ratio:       None      # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle numbers? REQUIRED if `generate_extra_dm_particles` is True. Otherwise, if not specified (or None), dm_to_gas_mass_ratio must be.
+dm_to_gas_mass_ratio:         1.0       # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle masses? If not spefified (or None), dm_to_gas_number_ratio must be.    
 
 # I/O SETTINGS #
 icgen_object_dir:      /path/to/base/dir/suite/ICs/object   # [Semi-optional] IC_Gen base directory for all ICs of this object. If it is not specified, icgen_work_dir must be.

@@ -234,7 +234,8 @@ class ParticleLoad:
 
         set_none(cparams, 'dm_to_gas_number_ratio')
         set_none(cparams, 'dm_to_gas_mass_ratio')
-            
+        set_none(cparams, 'extra_dm_particle_scheme')
+
         if (cparams['identify_gas'] and not
             cparams['generate_extra_dm_particles']):
             cparams['assign_gas'] = True
@@ -243,6 +244,10 @@ class ParticleLoad:
 
         if not cparams['identify_gas']:
             cparams['generate_extra_dm_particles'] = False
+
+        if cparams['generate_extra_dm_particles']:
+            if cparams['dm_to_gas_number_ratio'] is None:
+                raise ValueError("Must specify the DM oversampling factor!")
 
         # If an object directory is specified and has the specified mask file,
         # use that
@@ -480,8 +485,8 @@ class ParticleLoad:
             np.rint(np.cbrt(num_basepart_equiv)))
 
         print(f"Base resolution is {m_target:.2e} M_Sun, eqiv. to "
-              f"n = {self.sim_box['n_part_equiv']}^3 (base n = "
-              f"{self.sim_box['n_basepart_equiv']}^3)."
+              f"n = {self.sim_box['n_basepart_equiv']}^3 (full n = "
+              f"{self.sim_box['n_part_equiv']}^3)."
         )
 
     def load_mask_file(self):
@@ -1284,6 +1289,7 @@ class ParticleLoad:
         # Number of high resolution particles this rank will have.
         gcell_info = {
             'num_parts_per_cell': np.zeros(num_gcell_types, dtype=int) - 1,
+            'num_baseparts_per_cell': np.zeros(num_gcell_types, dtype=int) - 1,
             'particle_masses': np.zeros(num_gcell_types) - 1,
             'num_cells': np.zeros(num_gcell_types, dtype=int) - 1,
             'num_types': num_gcell_types
@@ -1320,6 +1326,7 @@ class ParticleLoad:
 
             # If we apply regular oversampling by splitting particles,
             # this increases the gcell load for type 0
+            gcell_info['num_baseparts_per_cell'][itype] = gcell_load
             if itype == 0 and self.config['generate_extra_dm_particles']:
                 gcell_load *= (1 + self.config['dm_to_gas_number_ratio'])
 
@@ -1536,17 +1543,9 @@ class ParticleLoad:
                     f"gcells of type {itype}, but found {ncell_type}!"
                 )
 
+            gcell_kernel_size = self.gcell_info['num_baseparts_per_cell'][itype]
             gcell_load_type = self.gcell_info['num_parts_per_cell'][itype]
             particle_mass_type = self.gcell_info['particle_masses'][itype]
-
-            # If we generate additional DM particles, `gcell_load_type`
-            # refers to the *total* number of particles, including replicated
-            # DM.
-            kernel_factor = (
-                self.config['dm_to_gas_number_ratio'] + 1
-                if self.config['generate_extra_dm_particles'] else 1
-            )
-            gcell_kernel_size = gcell_load_type / kernel_factor
 
             is_glass = ((itype == 0 and zone1_type == 'glass') or
                         (itype > 0 and zone2_type == 'glass'))
@@ -1662,7 +1661,7 @@ class ParticleLoad:
         zone2_type = self.config['zone2_type']
 
         glass = {}
-        num_parts_per_gcell_type = self.gcell_info['num_parts_per_cell']
+        num_parts_per_gcell_type = self.gcell_info['num_baseparts_per_cell']
         glass_dir = self.config['glass_files_dir']
         
         for iitype, num_parts in enumerate(num_parts_per_gcell_type):
@@ -1820,27 +1819,36 @@ class ParticleLoad:
         m_ratio = m_dm / m_gas
         if num_rep == 1:
             kr.replicate_kernel_bcc(kernel, ips, num_orig, m_ratio)
+
+        elif num_rep == 3:
+            if scheme in [None, 'face']:
+                kr.replicate_kernel_n3_faces(kernel, ips, num_orig, m_ratio)
+            elif scheme == 'edge':
+                kr.replicate_kernel_n3_edges(kernel, ips, num_orig, m_ratio)
+
         elif num_rep == 4:
             if scheme in [None, 'face']:
-                kr.replicate_kernel_n4_faces(kernel, ips, num_orig)
-            elif scheme in [None, 'edge']:
-                kr.replicate_kernel_n4_edges(kernel, ips, num_orig)
+                kr.replicate_kernel_n4_faces(kernel, ips, num_orig, m_ratio)
+            elif scheme == 'edge':
+                kr.replicate_kernel_n4_edges(kernel, ips, num_orig, m_ratio)
             elif scheme == 'square':
-                kr.replicate_kernel_subsquare(kernel, ips, num_orig)
+                kr.replicate_kernel_subsquare(kernel, ips, num_orig, m_ratio)
             else:
                 raise ValueError(
                     f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
         elif num_rep == 5:
             if scheme in [None, 'octahedron']:
-                kr.replicate_kernel_octahedron(kernel, ips, num_orig)
+                kr.replicate_kernel_octahedron(kernel, ips, num_orig, m_ratio)
             else:
                 raise ValueError(
                     f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
         elif num_rep == 7:
             if scheme in [None, 'subcube']:
-                kr.replicate_kernel_subcube(kernel, ips, num_orig)
+                kr.replicate_kernel_subcube(kernel, ips, num_orig, m_ratio)
             elif scheme == 'diamond':
-                kr.replicate_kernel_diamond(kernel, ips, num_orig)
+                kr.replicate_kernel_diamond(kernel, ips, num_orig, m_ratio)
             else:
                 raise ValueError(
                     f"Invalid scheme '{scheme}' for {num_rep} replications!")
