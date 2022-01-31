@@ -9,8 +9,10 @@ target_mass_type:    gas               # Specifies whether `target_mass` refers 
 
 # BARYON GENERATION #
 identify_gas:            False        # Should gas particles directly be identified in the particle load?
-dm_to_gas_number_ratio:  None         # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle numbers? If not specified (or None), dm_to_gas_mass_ratio must be.
-dm_to_gas_mass_ratio:    1.0          # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle masses? If not spefified (or None), dm_to_gas_number_ratio must be.    
+generate_extra_dm_particles:  False     # Should extra DM particles be generated instead of assigning subsets of grid/glass particles as DM and gas (default: False)? Only relevant if `identify_gas` is True.
+extra_dm_particle_scheme:     None      # Scheme to place extra DM particles relative to their "parent" gas particles in case of ambiguity (default: None, use defaults based on `dm_to_gas_number_ratio`). Options are 'face' (default) or 'edge' [N = 3, 4]; 'square' [N = 4]; 'subcube' (default) or 'diamond' [N = 7].  
+dm_to_gas_number_ratio:       None      # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle numbers? REQUIRED if `generate_extra_dm_particles` is True. Otherwise, if not specified (or None), dm_to_gas_mass_ratio must be.
+dm_to_gas_mass_ratio:         1.0       # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle masses? If not spefified (or None), dm_to_gas_number_ratio must be.    
 
 # I/O SETTINGS #
 icgen_object_dir:      /path/to/base/dir/suite/ICs/object   # [Semi-optional] IC_Gen base directory for all ICs of this object. If it is not specified, icgen_work_dir must be.
