@@ -119,7 +119,7 @@ def replicate_kernel_subsquare(kernel, ips, num_orig, mass_ratio):
 	for icube in range(0, 4):
 		kernel[(icube+1) * num_orig : (icube+2) * num_orig, ...] = (
 			kernel_orig + offsets[icube, :])
-		com += cube_offsets[icube, :] * mass_ratio
+		com += offsets[icube, :] * mass_ratio
 
 	shift = com / (1. + 4*mass_ratio)
 	kernel -= shift
@@ -156,7 +156,7 @@ def replicate_kernel_subcube(kernel, ips, num_orig, mass_ratio):
 	kernel_orig = kernel[: num_orig, ...]
 	com = np.array((0., 0., 0.))
 	for icube in range(1, 8):
-		kernel[icube * num_orig : icube+1 * num_orig, ...] = (
+		kernel[icube * num_orig : (icube+1) * num_orig, ...] = (
 			kernel_orig + cube_offsets[icube, :] * 0.5 * ips)
 		com += cube_offsets[icube, :] * 0.5 * ips * mass_ratio
 
