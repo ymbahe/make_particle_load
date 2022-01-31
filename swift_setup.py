@@ -314,7 +314,7 @@ def generate_param_file(data, args):
 
     if args.vrx is not None:
         params['Snapshots']['run_on_dump'] = 1
-        params['Snapshots']['dump_command'] = 'postprocess.sh'
+        params['Snapshots']['dump_command'] = './postprocess.sh'
         
     params['Restarts']['max_run_time'] = args.run_time - 0.5
 
@@ -387,7 +387,8 @@ def generate_param_file(data, args):
             args.table_dir + '/coolingtables/')
         params['EAGLEFeedback']['filename'] = (
             args.table_dir + '/yieldtables/')
-        params['EAGLEAGN']['min_gas_mass_for_nibbling'] = float(m_gas / 2)
+        params['EAGLEAGN']['min_gas_mass_for_nibbling'] = (
+            float(m_gas / 2) * 1e10)
         params['COLIBRECooling']['dir_name'] = (
             args.table_dir + '/UV_dust1_CR1_G1_shield1.hdf5')
         
@@ -398,7 +399,8 @@ def generate_param_file(data, args):
             args.table_dir + '/yieldtables/')
         params['COLIBREFeedback']['earlyfb_filename'] = (
             args.table_dir + '/Early_stellar_feedback.hdf5')
-        params['COLIBREAGN']['min_gas_mass_for_nibbling'] = float(m_gas / 2)
+        params['COLIBREAGN']['min_gas_mass_for_nibbling'] = (
+            float(m_gas / 2) * 1e10)
         params['COLIBRECooling']['dir_name'] = (
             args.table_dir + '/cooling_files_new')
         
