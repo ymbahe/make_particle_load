@@ -430,7 +430,7 @@ class ParticleLoad:
                     if self.config['target_mass_type'] == 'gas':
                         m_target *= (1 + omega_i) / (1 + omega_i / dm_m_factor)
                     elif self.config['target_mass_type'] == 'dm':
-                        m_target *= (1 + omega) / (1 + omega * dm_n_factor)
+                        m_target *= (1 + omega) / (1 + omega * dm_m_factor)
 
                 else:
                     raise ValueError(
@@ -450,8 +450,6 @@ class ParticleLoad:
                 if self.config['generate_extra_dm_particles']:
                     m_target *= (self.config['dm_to_gas_number_ratio'])
 
-            print(f"Ideal base particle mass is {m_target:.3e} M_Sun.")
-                
             n_per_gcell = np.cbrt(zone1_gcell_load)
 
             m_frac_target = m_target / self.sim_box['mass_msun']
@@ -461,6 +459,9 @@ class ParticleLoad:
             n_gcells_equiv = int(np.rint(n_equiv_target / n_per_gcell))
             num_basepart_equiv = n_gcells_equiv**3 * zone1_gcell_load
 
+            print(f"Ideal base particle mass is {m_target:.3e} M_Sun, "
+                  f"corresponding to n_equiv = {n_equiv_target:.2f}.")
+            
         else:
             m_target = self.sim_box['mass_msun'] / num_basepart_equiv
         
@@ -472,7 +473,7 @@ class ParticleLoad:
                 f"({num_basepart_equiv}) must be an integer multiple of the "
                 f"Zone I gcell load ({zone1_gcell_load})!"
             )
-
+        
         num_part_equiv = num_basepart_equiv
         if self.config['generate_extra_dm_particles']:
             num_part_equiv *= (self.config['dm_to_gas_number_ratio'] + 1)
@@ -484,7 +485,8 @@ class ParticleLoad:
         self.sim_box['n_basepart_equiv'] = int(
             np.rint(np.cbrt(num_basepart_equiv)))
 
-        print(f"Base resolution is {m_target:.2e} M_Sun, eqiv. to "
+        m_base = self.sim_box['mass_msun'] / num_basepart_equiv
+        print(f"Base resolution is {m_base:.3e} M_Sun, eqiv. to "
               f"n = {self.sim_box['n_basepart_equiv']}^3 (full n = "
               f"{self.sim_box['n_part_equiv']}^3)."
         )
@@ -776,7 +778,7 @@ class ParticleLoad:
                 f"of the mask bounding cube\n"
                 f"  {gcube['n_cells']} gcells per dimension, of size "
                 f"{gcube['cell_size_mpc']:.3f} Mpc\n"
-                f"  {gcube['num_cells']} gcells in total\n"
+                f"  {gcube['num_cells']} gcells in total.\n"
             )
 
         return gcube
