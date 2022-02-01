@@ -54,7 +54,7 @@ def replicate_kernel_n3_faces(kernel, ips, num_orig, mass_ratio):
 	for iicube, icube in enumerate([1, 3, 4]):
 		kernel[(iicube+1) * num_orig : (iicube+2) * num_orig, ...] = (
 			kernel_orig + cube_offsets[icube, :] * 0.5 * ips)
-		com += cube_offsets[iicube, :] * 0.5 * ips * mass_ratio
+		com += cube_offsets[icube, :] * 0.5 * ips * mass_ratio
 
 	shift = com / (1. + 3*mass_ratio)
 	kernel -= shift
@@ -68,7 +68,7 @@ def replicate_kernel_n3_edges(kernel, ips, num_orig, mass_ratio):
 	for iicube, icube in enumerate([2, 5, 7]):
 		kernel[(iicube+1) * num_orig : (iicube+2) * num_orig, ...] = (
 			kernel_orig + cube_offsets[icube, :] * 0.5 * ips)
-		com += cube_offsets[iicube, :] * 0.5 * ips * mass_ratio
+		com += cube_offsets[icube, :] * 0.5 * ips * mass_ratio
 
 	shift = com / (1. + 3*mass_ratio)
 	kernel -= shift
@@ -84,7 +84,7 @@ def replicate_kernel_n4_faces(kernel, ips, num_orig, mass_ratio):
 	for iicube, icube in enumerate([1, 3, 4, 6]):
 		kernel[(iicube+1) * num_orig : (iicube+2) * num_orig, ...] = (
 			kernel_orig + cube_offsets[icube, :] * 0.5 * ips)
-		com += cube_offsets[iicube, :] * 0.5 * ips * mass_ratio
+		com += cube_offsets[icube, :] * 0.5 * ips * mass_ratio
 
 	shift = com / (1. + 4*mass_ratio)
 	kernel -= shift
@@ -98,7 +98,7 @@ def replicate_kernel_n4_edges(kernel, ips, num_orig, mass_ratio):
 	for iicube, icube in enumerate([2, 5, 6, 7]):
 		kernel[(iicube+1) * num_orig : (iicube+2) * num_orig, ...] = (
 			kernel_orig + cube_offsets[icube, :] * 0.5 * ips)
-		com += cube_offsets[iicube, :] * 0.5 * ips * mass_ratio
+		com += cube_offsets[icube, :] * 0.5 * ips * mass_ratio
 
 	shift = com / (1. + 4*mass_ratio)
 	kernel -= shift
@@ -119,7 +119,7 @@ def replicate_kernel_subsquare(kernel, ips, num_orig, mass_ratio):
 	for icube in range(0, 4):
 		kernel[(icube+1) * num_orig : (icube+2) * num_orig, ...] = (
 			kernel_orig + offsets[icube, :])
-		com += cube_offsets[icube, :] * mass_ratio
+		com += offsets[icube, :] * mass_ratio
 
 	shift = com / (1. + 4*mass_ratio)
 	kernel -= shift
@@ -142,7 +142,7 @@ def replicate_kernel_n6(kernel, ips, num_orig, mass_ratio):
 	for iicube, icube in enumerate([1, 2, 3, 4, 5, 7]):
 		kernel[(iicube+1) * num_orig : (iicube+2) * num_orig, ...] = (
 			kernel_orig + cube_offsets[icube, :] * 0.5 * ips)
-		com += cube_offsets[iicube, :] * 0.5 * ips * mass_ratio
+		com += cube_offsets[icube, :] * 0.5 * ips * mass_ratio
 
 	shift = com / (1. + 6*mass_ratio)
 	kernel -= shift
@@ -156,7 +156,7 @@ def replicate_kernel_subcube(kernel, ips, num_orig, mass_ratio):
 	kernel_orig = kernel[: num_orig, ...]
 	com = np.array((0., 0., 0.))
 	for icube in range(1, 8):
-		kernel[icube * num_orig : icube+1 * num_orig, ...] = (
+		kernel[icube * num_orig : (icube+1) * num_orig, ...] = (
 			kernel_orig + cube_offsets[icube, :] * 0.5 * ips)
 		com += cube_offsets[icube, :] * 0.5 * ips * mass_ratio
 
@@ -184,7 +184,7 @@ def replicate_kernel_diamond(kernel, ips, num_orig, mass_ratio):
 	for iicube in range(1, 8):
 		kernel[iicube * num_orig : (iicube+1) * num_orig, ...] = (
 			kernel_orig + offsets[iicube, :])
-		com += cube_offsets[iicube, :] * mass_ratio
+		com += offsets[iicube, :] * mass_ratio
 
 	shift = com / (1. + 7*mass_ratio)
 	kernel -= shift
