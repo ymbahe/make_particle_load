@@ -150,8 +150,11 @@ def parse_arguments():
 
     if args.vrx is not None:
         args.run_vr_template = './swift_templates/run_vr_template.sh'
-        args.postprocess_file = './swift_templates/postprocess.sh'
-        
+        if args.sim_type == 'colibre':
+            args.postprocess_file = './swift_templates/postprocess_colibre.sh'
+        else:
+            args.postprocess_file = './swift_templates/postprocess.sh'            
+
     return args
 
 
@@ -435,7 +438,7 @@ def generate_postprocessing_scripts(data, args):
             'slurm_memory': data['slurm_memory'],
         }
         make_custom_copy(args.run_vr_template, vr_template_file, param_dict) 
-        copy(args.postprocess_file, args.run_dir)
+        copy(args.postprocess_file, args.run_dir/postprocess.sh)
         copy(args.vrx + '/stf', args.run_dir)
     
 def compute_top_level_cells(data):
