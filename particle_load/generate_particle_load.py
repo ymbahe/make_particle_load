@@ -1846,6 +1846,13 @@ class ParticleLoad:
                 raise ValueError(
                     f"Invalid scheme '{scheme}' for {num_rep} replications!")
 
+        elif num_rep == 6:
+            if scheme is None:
+                kr.replicate_kernel_n6(kernel, ips, num_orig, m_ratio)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
         elif num_rep == 7:
             if scheme in [None, 'subcube']:
                 kr.replicate_kernel_subcube(kernel, ips, num_orig, m_ratio)
@@ -1854,6 +1861,9 @@ class ParticleLoad:
             else:
                 raise ValueError(
                     f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
+        else:
+            raise ValueError(f"Invalid number of replications ({num_rep})!")
 
         return kernel, kernel_masses, {'dm': m_dm, 'gas': m_gas}
 
