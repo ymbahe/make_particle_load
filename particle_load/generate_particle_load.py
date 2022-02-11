@@ -12,6 +12,7 @@ from mpi4py import MPI
 import parallel_functions as pf
 from scipy.io import FortranFile
 import time
+import kernel_replications as kr
 
 # Append modules directory to PYTHONPATH
 sys.path.append(
@@ -190,6 +191,7 @@ class ParticleLoad:
             'box_size': None,
             'mask_file': None,
             'uniform_particle_number': None,
+            'uniform_particle_n': None,
             'target_mass': None,
             'target_mass_type': None,
             'identify_gas': False,
@@ -215,6 +217,8 @@ class ParticleLoad:
             'min_gcell_load': 8,
             'dm_to_gas_number_ratio': None,
             'dm_to_gas_mass_ratio': None,
+            'generate_extra_dm_particles': False,
+            'extra_dm_particle_scheme': None,
         }
 
         cparams = {}
@@ -230,7 +234,21 @@ class ParticleLoad:
 
         set_none(cparams, 'dm_to_gas_number_ratio')
         set_none(cparams, 'dm_to_gas_mass_ratio')
-            
+        set_none(cparams, 'extra_dm_particle_scheme')
+
+        if (cparams['identify_gas'] and not
+            cparams['generate_extra_dm_particles']):
+            cparams['assign_gas'] = True
+        else:
+            cparams['assign_gas'] = False
+
+        if not cparams['identify_gas']:
+            cparams['generate_extra_dm_particles'] = False
+
+        if cparams['generate_extra_dm_particles']:
+            if cparams['dm_to_gas_number_ratio'] is None:
+                raise ValueError("Must specify the DM oversampling factor!")
+
         # If an object directory is specified and has the specified mask file,
         # use that
         if (cparams['icgen_object_dir'] is not None and
@@ -283,8 +301,8 @@ class ParticleLoad:
             'icgen_module_setup': None,
             'icgen_num_species': None,
             'icgen_fft_to_gcube_ratio': 1.0,
-            'icgen_nmaxpart': 36045928,
-            'icgen_nmaxdisp': 791048437,
+            'icgen_nmaxpart': 46656000,   # 'C7mem' build of IC_Gen
+            'icgen_nmaxdisp': 454164480,  # 'C7mem' build of IC_Gen
             'icgen_runtime_hours': 4,
             'icgen_power_spectrum_file': None,
             'icgen_use_PH_IDs': True,
@@ -378,19 +396,26 @@ class ParticleLoad:
         specified target particle mass and number of particles per zone1 gcell.
 
         """
-        num_part_equiv = self.config["uniform_particle_number"]
+        num_basepart_equiv = self.config["uniform_particle_number"]
         zone1_gcell_load = self.config["zone1_gcell_load"]
 
-        if num_part_equiv is None:
+        # Compute from cube root number if needed and possible
+        if num_basepart_equiv is None:
+            if self.config['uniform_particle_n'] is not None:
+                num_basepart_equiv = self.config['uniform_particle_n']**3
 
-            # Compute from target particle mass
+        if num_basepart_equiv is None:
+
+            # --- Compute number from target particle mass ----
             m_target = self.config["target_mass"]
             if m_target is None:
                 raise ValueError("Must specify target mass!")
-
-            # Need to find  mass of 'raw' particles
             m_target = float(m_target)
-            if self.config['identify_gas']:
+
+            # Need to find mass of 'raw' particles (if all were same mass)
+            if self.config['assign_gas']:
+                # Generate enough for DM + gas particles
+
                 dm_m_factor = self.config['dm_to_gas_mass_ratio']
                 dm_n_factor = self.config['dm_to_gas_number_ratio']
                 omega = self.cosmo['OmegaBaryon'] / self.cosmo['OmegaDM']
@@ -405,23 +430,26 @@ class ParticleLoad:
                     if self.config['target_mass_type'] == 'gas':
                         m_target *= (1 + omega_i) / (1 + omega_i / dm_m_factor)
                     elif self.config['target_mass_type'] == 'dm':
-                        m_target *= (1 + omega) / (1 + omega * dm_n_factor)
+                        m_target *= (1 + omega) / (1 + omega * dm_m_factor)
 
                 else:
                     raise ValueError(
                         "Must specify either DM/gas number or mass ratio!")
-                
-            elif self.config['target_mass_type'] in ['gas', 'dm']:
-                m_target *= self.cosmo['Omega0']
-                if self.config['target_mass_type'] == 'gas':
-                    m_target /= self.cosmo['OmegaBaryon']
-                elif self.config['target_mass_type'] == 'dm':
-                    m_target /= self.cosmo['OmegaDM']
-                else:
-                    m_target /= self.cosmo['Omega0']
 
-            print(f"Ideal target particle mass is {m_target:.3e} M_Sun.")
-                
+            # If we get here, we divide gas/DM (if at all) by splitting
+
+            elif self.config['target_mass_type'] == 'gas':
+                m_target *= self.cosmo['Omega0'] / self.cosmo['OmegaBaryon']
+
+            elif self.config['target_mass_type'] == 'dm':
+                m_target *= self.cosmo['Omega0'] / self.cosmo['OmegaDM']
+
+                # If we split off more than one DM particle per gas particle,
+                # their (target) mass is reduced, so we need to start from
+                # correspondingly more massive base particles.
+                if self.config['generate_extra_dm_particles']:
+                    m_target *= (self.config['dm_to_gas_number_ratio'])
+
             n_per_gcell = np.cbrt(zone1_gcell_load)
 
             m_frac_target = m_target / self.sim_box['mass_msun']
@@ -429,35 +457,50 @@ class ParticleLoad:
 
             n_equiv_target = np.cbrt(num_equiv_target)            
             n_gcells_equiv = int(np.rint(n_equiv_target / n_per_gcell))
-            num_part_equiv = n_gcells_equiv**3 * zone1_gcell_load
+            num_basepart_equiv = n_gcells_equiv**3 * zone1_gcell_load
 
+            print(f"Ideal base particle mass is {m_target:.3e} M_Sun, "
+                  f"corresponding to n_equiv = {n_equiv_target:.2f}.")
+            
         else:
-            m_target = self.sim_box['mass_msun'] / num_part_equiv
+            m_target = self.sim_box['mass_msun'] / num_basepart_equiv
         
         # Sanity check: number of particles must be an integer multiple of the
         # glass file particle number.
-        if np.abs(num_part_equiv / zone1_gcell_load % 1) > 1e-6:
+        if np.abs(num_basepart_equiv / zone1_gcell_load % 1) > 1e-6:
             raise ValueError(
-                f"The full-box-equivalent particle number "
-                f"({num_part_equiv}) must be an integer multiple of the "
+                f"The full-box-equivalent base particle number "
+                f"({num_basepart_equiv}) must be an integer multiple of the "
                 f"Zone I gcell load ({zone1_gcell_load})!"
             )
+        
+        num_part_equiv = num_basepart_equiv
+        if self.config['generate_extra_dm_particles']:
+            num_part_equiv *= (self.config['dm_to_gas_number_ratio'] + 1)
+
         self.sim_box['num_part_equiv'] = num_part_equiv
         self.sim_box['n_part_equiv'] = int(np.rint(np.cbrt(num_part_equiv)))
 
-        print(f"Target resolution is {m_target:.2e} M_Sun, eqiv. to "
-              f"n = {self.sim_box['n_part_equiv']}^3.")
+        self.sim_box['num_basepart_equiv'] = num_basepart_equiv
+        self.sim_box['n_basepart_equiv'] = int(
+            np.rint(np.cbrt(num_basepart_equiv)))
+
+        m_base = self.sim_box['mass_msun'] / num_basepart_equiv
+        print(f"Base resolution is {m_base:.3e} M_Sun, eqiv. to "
+              f"n = {self.sim_box['n_basepart_equiv']}^3 (full n = "
+              f"{self.sim_box['n_part_equiv']}^3)."
+        )
 
     def load_mask_file(self):
         """
         Load the (previously computed) mask file that defines the zoom region.
 
         Most of this is only relevant for zoom simulations; for uniform volume
-        ICs we only return (0.5, 0.5, 0.5) as the "centre". For zooms, te mask
+        ICs we only return (0.5, 0.5, 0.5) as the "centre". For zooms, the mask
         file should have been generated with the `MakeMask` class in 
         `make_mask/make_mask.py`; an error is raised if no mask file is
         specified or if the specified file does not exist.
-                
+
         Parameters
         ----------
         None
@@ -521,7 +564,8 @@ class ParticleLoad:
                     f['Coordinates'].attrs.get("bounding_length")) / lbox_mpc
                 mask_data['high_res_volume'] = (
                     f['Coordinates'].attrs.get("high_res_volume")
-                    / lbox_mpc**3)
+                    / lbox_mpc**3
+                )
 
         else:
             mask_data = None
@@ -624,7 +668,7 @@ class ParticleLoad:
         ts.set_time('Create particle mass arrays')
         parts = {'pos': pos, 'm': masses}
         ts.set_time('Dictize particle arrays')
-                
+
         # Magic, part I: populate local gcells with particles (Zone I/II)
         self.generate_gcube_particles(gcells, parts, ts)
         #ts.set_time('Generate Zone-I/II particles')
@@ -668,7 +712,7 @@ class ParticleLoad:
         stime = time.time()
         gcube = {}
 
-        num_part_box = self.sim_box['num_part_equiv']
+        num_part_box = self.sim_box['num_basepart_equiv']
         zone1_gcell_load = self.config['zone1_gcell_load']
         num_buffer_gcells = self.config['gcube_n_buffer_cells']
 
@@ -734,7 +778,7 @@ class ParticleLoad:
                 f"of the mask bounding cube\n"
                 f"  {gcube['n_cells']} gcells per dimension, of size "
                 f"{gcube['cell_size_mpc']:.3f} Mpc\n"
-                f"  {gcube['num_cells']} gcells in total\n"
+                f"  {gcube['num_cells']} gcells in total.\n"
             )
 
         return gcube
@@ -1247,6 +1291,7 @@ class ParticleLoad:
         # Number of high resolution particles this rank will have.
         gcell_info = {
             'num_parts_per_cell': np.zeros(num_gcell_types, dtype=int) - 1,
+            'num_baseparts_per_cell': np.zeros(num_gcell_types, dtype=int) - 1,
             'particle_masses': np.zeros(num_gcell_types) - 1,
             'num_cells': np.zeros(num_gcell_types, dtype=int) - 1,
             'num_types': num_gcell_types
@@ -1280,6 +1325,13 @@ class ParticleLoad:
                     target_gcell_load, self.config['glass_files_dir'])
             else:
                 gcell_load = find_next_cube(target_gcell_load)
+
+            # If we apply regular oversampling by splitting particles,
+            # this increases the gcell load for type 0
+            gcell_info['num_baseparts_per_cell'][itype] = gcell_load
+            if itype == 0 and self.config['generate_extra_dm_particles']:
+                gcell_load *= (1 + self.config['dm_to_gas_number_ratio'])
+
             gcell_info['num_parts_per_cell'][itype] = gcell_load
 
             # Mass (fraction) of each particle in current gcell type
@@ -1429,7 +1481,7 @@ class ParticleLoad:
             np_target = (self.sim_box['num_part_equiv'] *
                          self.mask_data['high_res_volume'])
             print(
-                f"--- Target number of particles: "
+                f"--- Cosmic mean number of particles in selection region: "
                 f"{np_target:.2e} ({np_target**(1/3):.2f}^3, "
                 f"{np_target / np_tot * 100:.2f} % of actual total.)"
             )
@@ -1493,15 +1545,20 @@ class ParticleLoad:
                     f"gcells of type {itype}, but found {ncell_type}!"
                 )
 
+            gcell_kernel_size = self.gcell_info['num_baseparts_per_cell'][itype]
             gcell_load_type = self.gcell_info['num_parts_per_cell'][itype]
             particle_mass_type = self.gcell_info['particle_masses'][itype]
 
             is_glass = ((itype == 0 and zone1_type == 'glass') or
                         (itype > 0 and zone2_type == 'glass'))
             if is_glass:
-                kernel = glass[gcell_load_type] - 0.5
+                kernel_raw = glass[gcell_kernel_size] - 0.5
             else:
-                kernel = make_uniform_grid(num=gcell_load_type, centre=True)    
+                kernel_raw = make_uniform_grid(
+                    num=gcell_kernel_size, centre=True)
+
+            # Final kernel may only be found after replication
+            kernel = None
 
             if not self.config['identify_gas'] or itype > 0:
                 kernel_masses = np.zeros(gcell_load_type) + particle_mass_type
@@ -1510,8 +1567,19 @@ class ParticleLoad:
                     self.gcell_info['zone1_m_gas'] = -1
                     self.gcell_info['zone1_gas_mips_mpc'] = -1
             else:
-                # We assign gas particles right here
-                kernel_masses, mass_ptypes = self.identify_gas(gcell_load_type)
+                if self.config['generate_extra_dm_particles']:
+                    # Replicate the kernel structure a given number of times,
+                    # and assign gas/DM status to the replications
+                    # (analogous to Richings et al. 2021).
+                    kernel, kernel_masses, mass_ptypes = self.replicate_kernel(
+                        kernel_raw, self.config['dm_to_gas_number_ratio'],
+                        self.config['extra_dm_particle_scheme']
+                    )
+                else:
+                    # We assign gas particles right here
+                    kernel_masses, mass_ptypes = self.identify_gas(
+                        gcell_load_type)
+
                 self.gcell_info['zone1_m_dm'] = mass_ptypes['dm']
                 self.gcell_info['zone1_m_gas'] = mass_ptypes['gas']
 
@@ -1522,10 +1590,15 @@ class ParticleLoad:
                     np.cbrt(num_gas)
                 )
 
+            # If we have not assigned a final kernel yet, use raw one.
+            if kernel is None:
+                kernel = kernel_raw
+
             cy.fill_gcells_with_particles(
                 gcells['pos'][ind_type, :], kernel, parts['pos'],
                 parts['m'], kernel_masses, num_parts_created
             )
+
             np_type = ncell_type * gcell_load_type
             num_parts_created += np_type
 
@@ -1590,7 +1663,7 @@ class ParticleLoad:
         zone2_type = self.config['zone2_type']
 
         glass = {}
-        num_parts_per_gcell_type = self.gcell_info['num_parts_per_cell']
+        num_parts_per_gcell_type = self.gcell_info['num_baseparts_per_cell']
         glass_dir = self.config['glass_files_dir']
         
         for iitype, num_parts in enumerate(num_parts_per_gcell_type):
@@ -1671,6 +1744,129 @@ class ParticleLoad:
 
         return kernel_masses, {'dm': m_dm, 'gas': m_gas}
 
+    def replicate_kernel(self, kernel_orig, num_rep, scheme):
+        """
+        Replicate a kernel a given number of times and assign particle types.
+
+        The original particle positions must be in the range [-0.5, 0.5].
+        Each replication is offset by a certain amount from the original,
+        details depending on the replication number and specified scheme.
+
+        Parameters
+        ----------
+        kernel_orig : ndarray(float)
+            The coordinates of the original particles. This is updated and
+            will also contain the replications upon return.
+        num_rep : int
+            The number of replications to be generated.
+        scheme : string, optional
+            Specification of where the replications should be positioned
+            relative to the original particles. [TO BE CONTINUED]
+
+        Returns
+        -------
+        kernel_masses : ndarray(float)
+            The masses (in units of the total simulation mass) of each kernel
+            particle including replications.
+        mass_ptypes : dict
+            The masses for 'gas' and 'dm' particles, respectively (under these
+            keys).
+
+        """
+        num_orig = kernel_orig.shape[0]
+        num_final = int(num_orig * (1 + num_rep))
+
+        # Find total mass in DM and baryons in a gcell
+        f_m_baryon = self.cosmo['OmegaBaryon'] / self.cosmo['Omega0']
+        f_m_dm = 1.0 - f_m_baryon
+        m_gcell_tot = self.gcube['cell_size']**3
+        m_gcell_gas = m_gcell_tot * f_m_baryon
+        m_gcell_dm = m_gcell_tot * f_m_dm
+
+        # Calculate gas and DM particle numbers, depending on setting
+        dm_num_factor = num_rep
+        num_frac_dm = dm_num_factor / (1 + dm_num_factor)
+        num_dm = int(num_orig * dm_num_factor)
+        num_gas = num_orig
+
+        m_dm = m_gcell_dm / num_dm
+        m_gas = m_gcell_gas / num_gas
+
+        if comm_rank == 0:
+            m_to_msun = self.sim_box['mass_msun']
+            print(
+                f"Zone I: m_dm =  {m_dm:.5e} ({m_dm * m_to_msun:.5e} M_Sun),\n"
+                f"        m_gas = {m_gas:.5e} ({m_gas * m_to_msun:.5e} M_Sun)"
+                f"\n        ==> m_dm / m_gas = {m_dm / m_gas:.3f}."
+                f"\n        N_dm = {num_dm}, N_gas = {num_gas}"
+                f"\n        ==> N_dm / N_gas = {num_dm / num_gas:.2f}."
+            )
+
+        kernel_masses = np.zeros(num_final)
+        kernel_masses[num_orig :] = m_dm
+        kernel_masses[: num_orig] = m_gas
+
+        # That was the easy part, now replicate the particles...
+
+        # First, make space (use -1 as filler value)
+        kernel = np.zeros((num_final, 3)) - 1
+        kernel[: num_orig, ...] = np.copy(kernel_orig)
+
+        # To calculate the replication shifts, we need the mean inter-particle
+        # separation in the kernel (in units of the gcell)
+        ips = 1.0 / np.cbrt(num_orig)
+
+        # Since each replication scheme is different, outsource them each
+        # to their own function...
+        m_ratio = m_dm / m_gas
+        if num_rep == 1:
+            kr.replicate_kernel_bcc(kernel, ips, num_orig, m_ratio)
+
+        elif num_rep == 3:
+            if scheme in [None, 'face']:
+                kr.replicate_kernel_n3_faces(kernel, ips, num_orig, m_ratio)
+            elif scheme == 'edge':
+                kr.replicate_kernel_n3_edges(kernel, ips, num_orig, m_ratio)
+
+        elif num_rep == 4:
+            if scheme in [None, 'face']:
+                kr.replicate_kernel_n4_faces(kernel, ips, num_orig, m_ratio)
+            elif scheme == 'edge':
+                kr.replicate_kernel_n4_edges(kernel, ips, num_orig, m_ratio)
+            elif scheme == 'square':
+                kr.replicate_kernel_subsquare(kernel, ips, num_orig, m_ratio)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
+        elif num_rep == 5:
+            if scheme in [None, 'octahedron']:
+                kr.replicate_kernel_octahedron(kernel, ips, num_orig, m_ratio)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
+        elif num_rep == 6:
+            if scheme is None:
+                kr.replicate_kernel_n6(kernel, ips, num_orig, m_ratio)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
+        elif num_rep == 7:
+            if scheme in [None, 'subcube']:
+                kr.replicate_kernel_subcube(kernel, ips, num_orig, m_ratio)
+            elif scheme == 'diamond':
+                kr.replicate_kernel_diamond(kernel, ips, num_orig, m_ratio)
+            else:
+                raise ValueError(
+                    f"Invalid scheme '{scheme}' for {num_rep} replications!")
+
+        else:
+            raise ValueError(f"Invalid number of replications ({num_rep})!")
+
+        return kernel, kernel_masses, {'dm': m_dm, 'gas': m_gas}
+
     def _verify_gcube_region(self, parts, nparts_created, gvolume, ts):
         """
         Perform consistency checks and print info about high-res region.
@@ -1678,8 +1874,9 @@ class ParticleLoad:
         """
         ts.increase_time('Other')
         # Make sure that the coordinates are in the expected range
-        if np.max(np.abs(parts['pos'][:nparts_created])) > 0.5:
-            raise ValueError("Invalid Zone I/II coordinate values!")
+        if not self.config['generate_extra_dm_particles']:
+            if np.max(np.abs(parts['pos'][:nparts_created])) > 0.5:
+                raise ValueError("Invalid Zone I/II coordinate values!")
         ts.set_time('   _verify: check coordinate ranges')
         
         # Make sure that we have allocated the right mass (fraction)
@@ -1795,12 +1992,13 @@ class ParticleLoad:
         # Safety check on coordinates and masses
         if npart_local > 0:
             # Don't abs whole array to avoid memory overhead
-            if np.min(parts['pos']) < -0.5 or np.max(parts['pos']) > 0.5:
-                raise ValueError(
-                    f"Zone III particles outside allowed range (-0.5 -> 0.5)! "
-                    f"\nMinimum coordinate is {np.min(parts['pos'])}, "
-                    f"maximum is {np.min(parts['pos'])}."
-                )
+            if not self.config['generate_extra_dm_particles']:
+                if np.min(parts['pos']) < -0.5 or np.max(parts['pos']) > 0.5:
+                    raise ValueError(
+                        f"Particles outside allowed range (-0.5 -> 0.5)! "
+                        f"\nMinimum coordinate is {np.min(parts['pos'])}, "
+                        f"maximum is {np.min(parts['pos'])}."
+                    )
             if np.min(parts['m']) < 0 or np.max(parts['m']) > 1:
                 raise ValueError(
                     f"Masses should be in the range 0 --> 1, but we have "
@@ -2167,6 +2365,10 @@ class ParticleLoad:
             g.attrs.create('SimulationMass_MSun', self.sim_box['mass_msun'])
             g.attrs.create('NumPart_Equiv', self.sim_box['num_part_equiv'])
             g.attrs.create('N_Part_Equiv', self.sim_box['n_part_equiv'])
+            g.attrs.create('NumBasePart_Equiv',
+                self.sim_box['num_basepart_equiv'])
+            g.attrs.create('N_BasePart_Equiv',
+                self.sim_box['n_basepart_equiv'])
 
             for key in self.cosmo:
                 g.attrs[key] = self.cosmo[key]
@@ -2384,8 +2586,8 @@ class ParticleLoad:
 
         # Apply a safety margin around the maximum values allowed by IC-Gen.
         # This might help prevent 'STATE' errors...
-        num_max_part = int(self.extra_params['icgen_nmaxpart'] * 0.95)
-        num_max_disp = int(self.extra_params['icgen_nmaxdisp'] * 0.95)
+        num_max_part = int(self.extra_params['icgen_nmaxpart'])
+        num_max_disp = int(self.extra_params['icgen_nmaxdisp'])
 
         n_dim_fft = fft_params['n_mesh']
         num_cores_per_node = self.extra_params['num_cores_per_node']
@@ -2550,7 +2752,7 @@ class ParticleLoad:
         f_baryon = self.cosmo['OmegaBaryon'] / self.cosmo['Omega0']
         m_tot_gas = self.sim_box['mass_msun'] * f_baryon
         m_tot_gas /= (self.cosmo['hubbleParam'] * 1e10)  # to 1e10 M_Sun [no h]
-        return m_tot_gas / self.sim_box['num_part_equiv'] * 4
+        return m_tot_gas / self.sim_box['num_basepart_equiv'] * 4
 
 # ---------------------------------------------------------------------------
 

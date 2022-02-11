@@ -149,6 +149,7 @@ class MakeMask:
             self.params['topology_fill_holes'] = True
             self.params['topology_dilation_niter'] = 0
             self.params['topology_closing_niter'] = 0
+            self.params['phid_name'] = 'PeanoHilbertIDs'
             self.params['padding_snaps'] = None
             
             # Define a list of parameters that must be provided. An error
@@ -294,6 +295,7 @@ class MakeMask:
             r_r200 = 0
             r_r500 = 0
             r200 = vr_file['R_200crit'][vr_index]
+            self.params['r200'] = r200
             if self.params['highres_radius_r200'] > 0:
                 r_r200 = r200 * self.params['highres_radius_r200']
             try:
@@ -674,6 +676,9 @@ class MakeMask:
 
         print(f'[Rank {comm_rank}] Loaded {len(ids)} dark matter particles')
 
+        # Make a plot of the selection environment
+        self.plot_halo(coords)
+
         return ids[ind_primary], ids[ind_sel]
     
     def load_mask_ids(self, primary_ids) -> np.ndarray:
@@ -724,10 +729,11 @@ class MakeMask:
         if not self.params['ids_are_ph']:
             print("Translating particle IDs to PH IDs...", end='', flush=True)
             with h5py.File(self.params['ics_file'], 'r') as f:
-                ph_ids = f['PartType1/ParticleIDs'][...]
-                ids = ph_ids[ids]
+                ics_ph_ids = f[f"PartType1/{self.params['phid_name']}"][...]
+                ids = ics_ph_ids[ids-1]
+
             print(" done.")
-        
+
         # First, convert the (scalar) PH key for each particle back to a triple
         # of indices giving its (quantised, normalized) offset from the origin
         # in x, y, z. This must use the same grid (bits value) as was used
@@ -735,7 +741,7 @@ class MakeMask:
         # function is used to handle the PH algorithm.
         x, y, z = peano_hilbert_key_inverses(ids, self.params['bits'])
         ic_coords = np.vstack((x, y, z)).T
-
+        
         # Make sure that we get consistent values for the coordinates
         ic_min, ic_max = np.min(ic_coords), np.max(ic_coords)
         if ic_min < 0 or ic_max > 2**self.params['bits']:
@@ -1003,6 +1009,105 @@ class MakeMask:
         plt.savefig(plotloc, dpi=200)
         plt.close()
 
+    def plot_halo(self, pos):
+        """
+        Make an overview plot of the selected region.
+
+        Note that this function must be called on all MPI ranks, even though
+        only rank 0 generates the actual plot. The others are still required
+        to access (a subset of) the particles stored on them.
+
+        """
+        axis_labels = ['x', 'y', 'z']
+
+        # Extract frequently needed attributes for easier structure
+        frame = self.region - self.params['centre']
+        bound = np.max(np.abs(frame))
+        try:
+            r200 = self.params['r200']
+        except AttributeError:
+            r200 = None
+            
+        ind_sel = np.nonzero(np.max(np.abs(pos), axis=1) <= bound)[0]
+        hists = np.zeros((3, 200, 200))
+        for ii, (xx, yy) in enumerate(zip([0, 0, 1], [1, 2, 2])):
+            hists[ii, ...], xedges, yedges = np.histogram2d(
+                pos[ind_sel, yy], pos[ind_sel, xx], bins=200,
+                range=[[-bound, bound], [-bound, bound]]
+            )
+
+        hist_full = np.zeros((3, 200, 200)) if comm_rank == 0 else None
+        comm.Reduce([hists, MPI.DOUBLE],
+                    [hist_full, MPI.DOUBLE],
+                    op=MPI.SUM, root=0)
+
+        # Only need rank 0 from here on, combine all particles there.
+        if comm_rank != 0:
+            return
+
+        fig, axarr = plt.subplots(1, 3, figsize=(13, 4))
+
+        ind_filled = np.nonzero(hist_full > 0)
+        vmin, vmax = np.percentile(hist_full[ind_filled], [1, 99.99])
+
+        # Plot each projection (xy, xz, yz) in a separate panel. `xx` and `yy`
+        # denote the coordinate plotted on the x and y axis, respectively.
+        for ii, (xx, yy) in enumerate(zip([0, 0, 1], [1, 2, 2])):
+            ax = axarr[ii]
+            ax.set_aspect('equal')
+
+            ax.imshow(
+                np.log10(hist_full[ii, ...] + 1e-2),
+                origin='lower', interpolation='none',
+                extent=[-bound, bound, -bound, bound], aspect='equal',
+                vmin=np.log10(vmin), vmax=np.log10(vmax),
+            )
+            
+            # Draw the outline of the cubic bounding region
+            ax.plot((frame[0, xx], frame[1, xx], frame[1, xx],
+                     frame[0, xx], frame[0, xx]),
+                    (frame[0, yy], frame[0, yy], frame[1, yy],
+                     frame[1, yy], frame[0, yy]),
+                    linewidth=1, color='maroon'
+            )
+
+            ax.set_xlim(-bound, bound)
+            ax.set_ylim(-bound, bound)
+
+            ax.set_xlabel(f"${axis_labels[xx]}$ [Mpc]")
+            ax.set_ylabel(f"${axis_labels[yy]}$ [Mpc]")
+            
+            # Plot target high-resolution sphere (if that is our shape).
+            if self.params['shape'] == 'sphere':
+                phi = np.arange(0, 2.0001*np.pi, 0.001)
+                radius = self.params['radius']
+                ax.plot(np.cos(phi) * radius, np.sin(phi) * radius,
+                        color='white', linestyle='-', linewidth=2,
+                        zorder=100)
+                ax.plot(np.cos(phi) * radius, np.sin(phi) * radius,
+                        color='grey', linestyle='--', linewidth=1,
+                        zorder=100)
+                if r200 is not None:
+                    ax.plot(np.cos(phi) * r200, np.sin(phi) * r200,
+                            color='white', linestyle=':', linewidth=1,
+                            zorder=100)
+                
+                if ii == 0:
+                    ax.text(
+                        0, self.params['radius']*0.9,
+                        f'z = ${self.zred_snap:.2f}$',
+                        color='grey', fontsize=6, va='bottom', ha='center',
+                        bbox={'facecolor': 'white', 'edgecolor': 'grey',
+                              'pad': 0.25, 'boxstyle': 'round',
+                              'linewidth': 0.3}
+                    )
+        # Save the plot
+        plt.subplots_adjust(left=0.05, right=0.99, bottom=0.15, top=0.99)
+        plotloc = os.path.join(
+            self.params['output_dir'], self.params['fname']) + "_selection.png"
+        plt.savefig(plotloc, dpi=200)
+        plt.close()
+        
     def save(self):
         """
         Save the generated mask for further use.
@@ -1092,4 +1197,4 @@ def periodic_wrapping(r, boxsize, return_copy=False):
 
 # Allow using the file as stand-alone script
 if __name__ == '__main__':
-    x = MakeMask(sys.argv[1])
+    MakeMask(sys.argv[1])

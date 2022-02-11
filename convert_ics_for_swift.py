@@ -147,8 +147,48 @@ class SwiftICs:
         self.meta['m_dm'] = mdm / h
                 
     def remap_ids(self, args):
-        pass
+        """Re-map particle IDs to contiguous range."""
 
+        # Abort if remapping is disabled
+        if not args.remap_ids:
+            return
+
+        if self.num_parts[0] > 0:
+            self.pt0['PeanoHilbertIDs'] = np.copy(self.pt0['ParticleIDs'])
+            self.pt0['ParticleIDs'] = (
+                (np.arange(self.num_parts[0]) + 1) * 2 + 1
+            )
+        if self.num_parts[1] > 0:
+            self.pt1['PeanoHilbertIDs'] = np.copy(self.pt1['ParticleIDs'])
+            self.pt1['ParticleIDs'] = (
+                (np.arange(self.num_parts[1]) + 1)
+            )
+            # Only shift DM IDs to even if there are baryons
+            if self.num_parts[0] + self.num_parts[4] + self.num_parts[5] > 0:
+                self.pt0['ParticleIDs'] *= 2
+                
+        if self.num_parts[2] > 0:
+            self.pt2['PeanoHilbertIDs'] = np.copy(self.pt2['ParticleIDs'])
+            self.pt2['ParticleIDs'] = (
+                np.arange(self.num_parts[2]) + int(1e15))
+        if self.num_parts[3] > 0:
+            self.pt3['PeanoHilbertIDs'] = np.copy(self.pt3['ParticleIDs'])
+            self.pt3['ParticleIDs'] = (
+                np.arange(self.num_parts[3]) + int(1e17))
+     
+        if self.num_parts[4] > 0:
+            self.pt4['PeanoHilbertIDs'] = np.copy(self.pt4['ParticleIDs'])
+            self.pt4['ParticleIDs'] = (
+                (np.arange(self.num_parts[4]) + self.num_parts[0] + 1) * 2 + 1
+            )
+        if self.num_parts[5] > 0:
+            self.pt5['PeanoHilbertIDs'] = np.copy(self.pt5['ParticleIDs'])
+            self.pt5['ParticleIDs'] = (
+                (np.arange(self.num_parts[5])
+                 + self.num_parts[0] + self.num_parts[4] + 1
+                ) * 2 + 1
+            )
+            
     def save(self, args):
         """Write the data to a SWIFT-compatible single file."""
 
@@ -207,6 +247,10 @@ def parse_arguments():
     parser.add_argument(
         '-r', '--repo_dir',
         help='[Optional] Directory in which to write output.'
+    )
+    parser.add_argument(
+        '-i', '--remap_ids', action='store_true',
+        help='Remap IDs to contiguous range?'
     )
     parser.add_argument(
         '-f', '--input_file_name',

@@ -29,8 +29,7 @@ TimeIntegration:
 # Parameters for the self-gravity scheme
 Gravity:
   eta:                         0.025     # Constant dimensionless multiplier for time integration.
-  MAC:                         adaptive  # Use the geometric opening angle condition
-  epsilon_fmm:                 0.001
+  MAC:                         geometric  # Use the geometric opening angle condition
   theta_cr:                    0.7       # Opening angle (Multipole acceptance criterion)
   use_tree_below_softening:    0
   mesh_side_length:            256       # use 128 for 188^3 particles and 256 for 376^3 particles
@@ -63,6 +62,7 @@ InitialConditions:
   file_name:                   None
   periodic:                    1
   cleanup_h_factors:           1
+  cleanup_smoothing_lengths:   1
   cleanup_velocity_factors:    1
   generate_gas_in_ics:         0     # Generate gas particles from the DM-only ICs
   remap_ids:                   1     # Remap the IDs to the range [1, N]  
@@ -168,7 +168,12 @@ DustEvolution:
   clumping_factor:                  10.             # Boost factor applied to accretion rate (default 1.)
   diffusion_boost_factor:           1.              # Boost factor applied to diffusion rate for dust (default 1.)
   dust_yields_path:                 ./dust_yields   # T20 dust only: Path to where AGB dust yield tables are locatedv (default ./dust_yields)
-  silicate_fe_grain_fraction:       0.5             # T20 dust only: value X controls forsterite/fayalite grain mix (giving effective grain of Fe_2XMg_(2X-2)MgSiO_4)
+  silicate_molecule_subscript_iron:               1 # subscript for iron in the effective silicate molecule e.g. FeMgSi2O6 (default 1)
+  silicate_molecule_subscript_magnesium:          1 # subscript for magnesium in the effective silicate molecule e.g. FeMgSi2O6 (default 1)
+  silicate_molecule_subscript_silicon:            2 # subscript for silicon in the effective silicate molecule e.g. FeMgSi2O6 (default 2)
+  silicate_molecule_subscript_oxygen:             6 # subscript for oxygen in the effective silicate molecule e.g. FeMgSi2O6 (default 6)
+  limit_depletion:                1              # Do we apply a maximum depletion limit to each element (default 0.)
+  undepleted_min_reduction_factor:  0.423345     # if limit_depletion on, apply factor to Ploeckinger+20 diffuse limits, a factor 0.5 here => a factor 2 higher possible depletions (default 1.)
   initial_abundance_graphite:        0.0            # T20 dust only: Initial abundance of graphite dust 	
   initial_abundance_silicate:        0.0            # T20 dust only: Initial abundance of silicate dust 
   initial_abundance_depletedC:       0.0            # M16 dust only: Initial abundance of dust-phase carbon 
@@ -204,22 +209,23 @@ COLIBREFeedback:
   SNII_max_mass_Msun:             100.0             # Maximal mass considered for SNII feedback (not SNII enrichment!) in solar masses.
   SNII_wind_delay_Gyr:              -1.0            # Time in Gyr between a star's birth and the SNII thermal feedback event. (< 0. for continuous SNe)
   SNII_delay_thermal_feedback_Gyr:  0.02            # Time in Gyr between a star's birth and the earliest possible SNII thermal feedback event. If SNe occur at earlier times, these events are postponed.
-  SNII_delta_T_n_0_H_p_cm3:         0.3             # Pivot (physical) density in SNII variable-dT thermal feedback in H/cm3.
+  SNII_delta_T_n_0_H_p_cm3:         0.25            # Pivot (physical) density in SNII variable-dT thermal feedback in H/cm3.
+  SNII_delta_T_K:                   3.16228e6       # Minimum change + pivot temperature in SNII variable-dT thermal feedback in Kelvin.
   SNII_delta_T_K_pivot:             3.16228e6       # Pivot temperature in SNII variable-dT thermal feedback in Kelvin. 
   SNII_delta_T_slope:               0.666666666     # Slope in SNII variable-dT thermal feedback.
   SNII_delta_T_K:                   3.16228e6       # Minimal change + pivot in temperature to apply to the gas particle in an SNII thermal feedback event in Kelvin.
   SNII_delta_T_K_min:               3.16228e6       # Minimal change in temperature to apply to the gas particle in an SNII thermal feedback event in Kelvin.
   SNII_delta_T_K_max:               1e8             # Maximal change in temperature to apply to the gas particle in na SNII thermal feedback event in Kelvin.
-  SNII_energy_erg:                  1.0e51          # Energy of one SNII explosion in ergs.
+  SNII_energy_erg:                  2.5e51          # Energy of one SNII explosion in ergs.
   SNII_delta_v_km_p_s:              50.0            # Change in the gas-particle velocity that is kicked in a SNII kinetic feedback event
   SNII_f_kinetic:                   0.1             # Fraction of SNII energy injected into the gas in kinetic form (the remaining fraction is injected in thermal form)
   SNII_energy_fraction_min:         1.0             # Minimal fraction of energy applied in a SNII feedback event.
-  SNII_energy_fraction_max:         4.0             # Maximal fraction of energy applied in a SNII feedback event.
-  SNII_energy_fraction_Z_0:         0.012663729     # Pivot point for the metallicity dependance of the SNII energy fraction (metal mass fraction).
+  SNII_energy_fraction_max:         1.0             # Maximal fraction of energy applied in a SNII feedback event.
+  SNII_energy_fraction_Z_0:         0.0134          # Pivot point for the metallicity dependance of the SNII energy fraction (metal mass fraction).
   SNII_energy_fraction_n_0_H_p_cm3: 0.67            # Pivot point for the birth density dependance of the SNII energy fraction in cm^-3.
-  SNII_energy_fraction_n_Z:         1.0             # Power-law for the metallicity dependance of the SNII energy fraction.
+  SNII_energy_fraction_n_Z:         0.0             # Power-law for the metallicity dependance of the SNII energy fraction.
   SNII_energy_fraction_n_n:         0.0             # Power-law for the birth density dependance of the SNII energy fraction.
-  SNIa_energy_erg:                 1.0e51           # Energy of one SNIa explosion in ergs.
+  SNIa_energy_erg:                  1.0e51          # Energy of one SNIa explosion in ergs.
   SNIa_delta_T_K:                   3.16228e7       # Change in temperature to apply to the gas particle in a SNIa thermal feedback event in Kelvin.
   SNIa_energy_fraction:             1.0             # Fraction of energy applied in a SNIa feedback event.
   AGB_ejecta_velocity_km_p_s:      10.0             # Velocity of the AGB ejectas in km/s.
@@ -239,8 +245,8 @@ COLIBREFeedback:
   HIIregion_temperature:            1.e4            # Temperature of gas particles tagged as HII regions
   HIIregion_rebuild_dt_Myr:         2.0             # Time between rebuilding the HII region in Myr 
   earlyfb_filename:                 ./Early_stellar_feedback.hdf5 # Location of file for early feedback, no needed if stellarwind_maxage_Myr = HIIregion_maxage_Myr = 0.
-  stellar_evolution_age_cut_Gyr:    1.0             # Stellar age in Gyr above which the enrichment is down-sampled.
-  stellar_evolution_sampling_rate:   10             # Number of time-steps in-between two enrichment events for a star above the age threshold.
+  stellar_evolution_age_cut_Gyr:    0.1             # Stellar age in Gyr above which the enrichment is down-sampled.
+  stellar_evolution_sampling_age_fraction: 0.05     # Time-step of the stars in units of the star's current age when the star is older than the age cut.
   num_of_NSM_per_Msun:              1.54e-5         # Number of neutron star mergers per Msolar.
   yield_Eu_from_NSM_event_Msun:     1.5e-5          # Amount of europium (in units of Msolar) released by NSM.
   num_of_CEJSN_per_Msun:            1.22e-5         # Number of rare core-collapse SN (CEJSN) per Msolar.
@@ -325,7 +331,7 @@ Restarts:
   delta_hours:  2.0
   max_run_time: 71.5                 # Three days minus fergie time
   resubmit_on_exit:   1
-  resubmit_command:   ./resub.sh
+  resubmit_command:   ./auto_resubmit
 
 StructureFinding:
   config_file_name:         vrconfig.cfg
