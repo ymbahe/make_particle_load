@@ -151,6 +151,7 @@ class MakeMask:
             self.params['topology_closing_niter'] = 0
             self.params['phid_name'] = 'PeanoHilbertIDs'
             self.params['padding_snaps'] = None
+            self.params['highres_padding_width'] = 0
             
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
@@ -178,7 +179,7 @@ class MakeMask:
                     ('vr_file',
                      'a Velociraptor catalogue to select groups from'),
                     ('sort_type', 'the method for halo sorting')
-                    ]
+                ]
                 for req in requirements:
                     if not req[0] in params:
                         raise KeyError(f"Need to provide {req[1]}!")
@@ -223,9 +224,11 @@ class MakeMask:
                 self.params[att] = params[att]
 
             # If desired, find the halo to center the high-resolution on
+            # and the *unpadded* target high-resolution sphere radius.
             if self.params['select_from_vr']:
-                self.params['centre'], self.params['radius'], vr_index = (
+                self.params['centre'], self.params['hr_radius'], vr_index = (
                     self.find_highres_sphere())
+
             self.params['fname'] = (
                 self.params['fname'].replace('$vr', f'{vr_index}'))
             self.params['output_dir'] = (
@@ -275,8 +278,7 @@ class MakeMask:
         centre : ndarray(float)
             3-element array holding the centre of the high-res region.
         radius : float
-            The target radius of the high-res region, including any requested
-            padding.
+            The target radius of the high-res region, without padding.
         vr_index : int
             The index of the VR halo.
 
@@ -309,27 +311,20 @@ class MakeMask:
                          f"{self.params['highres_radius_r500']} r_500.",
                          RuntimeWarning)
 
-            r_highres = max(r_r200, r_r500)
-            if r_highres <= 0:
-                raise ValueError(
-                    f"Invalid radius of high-res region ({r_highres})")
-
-            # Store unpadded high-res readius
-            self.params['primary_highres_radius'] = r_highres
-            
-            # If enabled, add a fixed "padding" radius to the high-res sphere
-            if self.params['highres_radius_padding'] > 0:
-                r_highres += self.params['highres_radius_padding']
-
-            # If enabled, expand radius to requested minimum.
-            if self.params['highres_radius_min'] > 0:
-                r_highres = max(r_highres, self.params['highres_radius_min'])
-
             # Load halo centre
             names = ['X', 'Y', 'Z']
             centre = np.zeros(3)
             for icoord, prefix in enumerate(names):
                 centre[icoord] = vr_file[f'{prefix}cminpot'][vr_index]
+
+        r_highres = max(r_r200, r_r500)
+        if r_highres <= 0:
+            raise ValueError(
+                f"Invalid radius of high-res region ({r_highres})")
+
+        # If enabled, expand radius to requested minimum.
+        if self.params['highres_radius_min'] > 0:
+            r_highres = max(r_highres, self.params['highres_radius_min'])
 
         r500_str = '' if r500 is None else f'{r500:.4f}'
         m200_str = (
@@ -419,7 +414,8 @@ class MakeMask:
 
         This assumes that the centre and extent of the high-res region
         have already been determined, either from the parameter file or
-        from the Velociraptor halo catalogue.
+        from the Velociraptor halo catalogue - in the latter case, this is
+        done inside `read_param_file()`.
 
         Note that only MPI rank 0 contains the final mask, as an attribute
         `self.mask`.
@@ -436,18 +432,19 @@ class MakeMask:
                 f"Invalid value of padding_factor={padding_factor}!")
 
         # Find cuboidal frame enclosing the target high-resolution region
+        # and any padding around it
         self.region = self.find_enclosing_frame()
 
-        # Load IDs of particles within target high-res region from snapshot.
-        # Note that only particles assigned to current MPI rank are loaded,
-        # which may be none.
-        primary_ids, mask_ids = self.load_primary_ids()
+        # Load IDs of particles within target high-res region, and those
+        # that lie within the surrounding padding zone. Only particles assigned
+        # to the current MPI rank are loaded, which may be none.
+        target_ids, pad_ids = self.load_primary_ids()
 
-        # Identify mask particles. This includes all primary particles, but
-        # also those that need to be included in the high-resolution region
-        # to keep the primary particles well padded.
+        # If desired, identify additional padding particles in other snapshots.
+        # This is currently only possible in non-MPI runs.
+        # ** NOT IMPLEMENTED YET **
         if self.params['padding_snaps'] is not None:
-            mask_ids = self.load_mask_ids(primary_ids)
+            pad_ids = self.load_extra_pad_ids(target_ids, pad_ids)
         
         # Find initial positions from particle IDs (recall that these are
         # really Peano-Hilbert indices). Coordinates are in the same units
@@ -514,7 +511,9 @@ class MakeMask:
         self.mask_widths += self.cell_size
         self.mask_extent = np.max(self.mask_widths)
         
-        # Need to re-center such that the *mask* is centred on origin
+        # Need to re-center such that the *mask* is centred on origin.
+        # The basic mask is already centred, but the refinement may have
+        # shifted things a bit.
         mask_offset = (self.mask_box[1, :] + self.mask_box[0, :]) / 2
         self.mask_box[0, :] -= mask_offset
         self.mask_box[1, :] -= mask_offset
@@ -564,18 +563,22 @@ class MakeMask:
 
         """
         centre = self.params['centre']
+        pad_width = self.params['highres_padding_width']
         frame = np.zeros((2, 3))
 
         # If the target region is a sphere, find the enclosing cube
         if self.params['shape'] == 'sphere':
-            frame[0, :] = centre - self.params['radius']
-            frame[1, :] = centre + self.params['radius']
+            frame[0, :] = centre - (self.params['hr_radius'] + pad_width)
+            frame[1, :] = centre + (self.params['hr_radius'] + pad_width)
 
         # If the target region is a cuboid, simply transform from centre and
         # side length to lower and upper bounds along each coordinate
         elif self.params['shape'] in ['cuboid', 'slab']:
-            frame[0, :] = centre - self.params['dim'] / 2.
-            frame[1, :] = centre + self.params['dim'] / 2.
+            frame[0, :] = centre - (self.params['dim'] / 2. + pad_width)
+            frame[1, :] = centre + (self.params['dim'] / 2. + pad_width)
+
+        else:
+            raise ValueError(f"Invalid shape {self.params['shape']}!")
 
         if comm_rank == 0:
             print(
@@ -588,18 +591,28 @@ class MakeMask:
 
     def load_primary_ids(self):
         """
-        Load IDs of particles in specified high-res region.
+        Load IDs of particles in and near the specified high-res region.
+
+        This includes both "target" particles that are within the specified
+        region in the primary snapshot, and "padding" particles that surround
+        the target high-res region.
+
+        If run on multiple MPI ranks, this only load the particles belonging
+        to the current rank, which may be none.
 
         In addition, relevant metadata are loaded and stored in the
-        `self.params` dict.
+        `self.params` dict.        
 
         Returns
         -------
-        ids : ndarray(int)
-            The particle IDs of the primary particles.
-        ids_all : ndarray(int)
-            The IDs of all particles to be treated as high-res, including
-            ones that are only included for padding.
+        ids_target : ndarray(int)
+            The particle IDs of the primary target particles (i.e. those in
+            the target high-res region).
+        ids_pad : ndarray(int)
+            The IDs of additional padding particles that should also be
+            treated as high-res, but are not within the target region. This
+            may be empty, especially if self.params['highres_padding_width']
+            is zero.
 
         """
         # To make life simpler, extract some frequently used parameters
@@ -639,15 +652,18 @@ class MakeMask:
         # Select particles within target region
         l_unit = self.params['length_unit']
         ind_primary = None
+        
         if shape == 'sphere':
             if comm_rank == 0:
                 print(f"Clipping to sphere around {cen}, with radius "
-                      f"{self.params['radius']:.4f} {l_unit}")
+                      f"{self.params['hr_radius']:.4f} {l_unit}")
 
             dists = np.linalg.norm(coords, axis=1)
-            ind_sel = np.where(dists <= self.params['radius'])[0]
-            ind_primary = np.nonzero(
-                dists <= self.params['primary_highres_radius'])[0]
+            ind_target = np.where(dists <= self.params['hr_radius'])[0]
+            r_padded = (self.params['hr_radius'] +
+                        self.params['highres_padding_width'])
+            ind_pad = np.nonzero(
+                (dists > self.params['hr_radius']) & (dists <= r_padded))[0]
 
         elif self.params['shape'] in ['cuboid', 'slab']:
             if comm_rank == 0:
@@ -661,10 +677,16 @@ class MakeMask:
             # offset by the maximum allowed extent in the corresponding
             # dimension, and find those where the result is between -1 and 1
             # for all three dimensions
-            ind_sel = np.where(
-                np.max(np.abs(coords / (self.params['dim'] / 2)), axis=1)
-                <= 1)[0]
-            ind_primary = np.copy(ind_sel)
+            l_target = self.params['dim'] / 2
+            l_padded = l_target + self.params['highres_padding_width']
+            ind_target = np.where(
+                np.max(np.abs(coords / l_target), axis=1) <= 1)[0]
+            ind_pad = np.where(
+                (np.max(np.abs(coords / l_target), axis=1) > 1) &
+                (np.max(np.abs(coords / l_padded), axis=1) <= 1)
+            )[0]
+        else:
+            raise ValueError(f"Invalid shape {self.params['shape']}")
 
         # We need the IDs of particles lying in the mask region
         ids = snap.read_dataset(1, 'ParticleIDs')
@@ -679,7 +701,7 @@ class MakeMask:
         # Make a plot of the selection environment
         self.plot_halo(coords)
 
-        return ids[ind_primary], ids[ind_sel]
+        return ids[ind_target], ids[ind_pad]
     
     def load_mask_ids(self, primary_ids) -> np.ndarray:
         """
@@ -988,14 +1010,14 @@ class MakeMask:
             # Plot target high-resolution sphere (if that is our shape).
             if self.params['shape'] == 'sphere':
                 phi = np.arange(0, 2.0001*np.pi, 0.001)
-                radius = self.params['radius']
+                radius = self.params['hr_radius']
                 ax.plot(np.cos(phi) * radius, np.sin(phi) * radius,
                         color='white', linestyle='-', linewidth=2)
                 ax.plot(np.cos(phi) * radius, np.sin(phi) * radius,
                         color='grey', linestyle='--', linewidth=1)
                 if ii == 0:
                     ax.text(
-                        0, self.params['radius'],
+                        0, self.params['hr_radius'],
                         f'z = ${self.zred_snap:.2f}$',
                         color='grey', fontsize=6, va='bottom', ha='center',
                         bbox={'facecolor': 'white', 'edgecolor': 'grey',
@@ -1080,7 +1102,7 @@ class MakeMask:
             # Plot target high-resolution sphere (if that is our shape).
             if self.params['shape'] == 'sphere':
                 phi = np.arange(0, 2.0001*np.pi, 0.001)
-                radius = self.params['radius']
+                radius = self.params['hr_radius']
                 ax.plot(np.cos(phi) * radius, np.sin(phi) * radius,
                         color='white', linestyle='-', linewidth=2,
                         zorder=100)
@@ -1094,7 +1116,7 @@ class MakeMask:
                 
                 if ii == 0:
                     ax.text(
-                        0, self.params['radius']*0.9,
+                        0, self.params['hr_radius']*0.9,
                         f'z = ${self.zred_snap:.2f}$',
                         color='grey', fontsize=6, va='bottom', ha='center',
                         bbox={'facecolor': 'white', 'edgecolor': 'grey',
@@ -1157,7 +1179,7 @@ class MakeMask:
             if self.params['shape'] in ['cuboid', 'slab']:
                 high_res_volume = np.prod(self.params['dim'])
             else:
-                high_res_volume = 4 / 3. * np.pi * self.params['radius']**3.
+                high_res_volume = 4 / 3. * np.pi * self.params['hr_radius']**3
             ds.attrs.create('high_res_volume', high_res_volume)
 
         print(f"Saved mask data to file `{outloc}`.")
