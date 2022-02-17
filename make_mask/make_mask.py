@@ -155,12 +155,13 @@ class MakeMask:
             self.params['phid_name'] = 'PeanoHilbertIDs'
             self.params['padding_snaps'] = None
             self.params['highres_padding_width'] = 0
+            self.params['highres_diffusion_buffer'] = 50.0
+            self.params['cell_padding_width'] = 0.0
             
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
             required_params = [
                 'fname',
-                'snap_file',
                 'ids_are_ph',
                 'bits',
                 'data_type',
@@ -173,6 +174,10 @@ class MakeMask:
                     raise KeyError(
                         f"Need to provide a value for {att} in the parameter "
                         f"file '{param_file}'!")
+
+            if 'snapshot_file' not in params:
+                params['snapshot_file'] = params['snapshot_base'].replace(
+                    '$isnap', params['primary_snapshot'])
 
             # Run checks for automatic group selection
             if params['select_from_vr']:
@@ -501,7 +506,9 @@ class MakeMask:
         # Expand the mask with updated padding particles. If applicable, this
         # also adds entire high-res padding cells around those hosting target
         # particles. The mask is enlarged appropriately to allow refinement.
-        self.full_mask.expand(self.lagrangian_coords[inds_pad, :])
+        self.full_mask.expand(
+            self.lagrangian_coords[inds_pad, :],
+            cell_padding_width=self.params['cell_padding_width'])
 
         # We only need MPI rank 0 for the rest, since we are done working with
         # individual particles
@@ -950,7 +957,8 @@ class MakeMask:
             snaps = np.concatenate(([self.params['primary_snapshot']], snaps))
 
         for snap in snaps:
-            snap_file = self.params['snapshot_base'] + f'{snap:04d}.hdf5'
+            snap_base = self.params['snapshot_base']
+            snap_file = snap_base.replace('$isnap', f'{snap:04d}')
             with h5.File(snap_file, 'r') as f:
                 snap_ids = f['PartType1/ParticleIDs'][...]
                 snap_pos = f['PartType1/Coordinates'][...]
@@ -977,10 +985,6 @@ class MakeMask:
             inds_pad = np.unique(np.concatenate((inds_pad, inds_tagged)))
 
         return inds_pad
-
-    def expand_full_mask(self, mask, r, inds_pad):
-        """Expand the given mask by the particles specified in r."""
-
 
 
     def plot(self, max_npart_per_rank=int(1e5)):
@@ -1231,7 +1235,7 @@ class Mask:
         self.shape = np.array(self.mask.shape)
         self.cell_size = self.edges[0][1] - self.edges[0][0]
 
-    def expand(self, r, target_mask=None, cell_padding_size=0,
+    def expand(self, r, target_mask=None, cell_padding_width=0,
                refinement_allowance=None):
         """
         Expand the mask to accommodate additional particles and cells.
@@ -1243,10 +1247,11 @@ class Mask:
 
         cell_indices = coordinate_to_cell(r, self.cell_size, self.shape)
 
-        if cell_padding_size > 0:
+        if cell_padding_width > 0:
             if target_mask is None:
                 raise ValueError("Must provide target mask!")
-            cell_pad_extra = cell_padding_size*2
+            cell_pad_extra = (
+                int(np.ceil(cell_padding_width / self.cell_size)) * 2)
 
         if refinement_allowance is not None:
             ref_extra = np.ceil(target_mask.shape * refinement_allowance[0])
@@ -1281,10 +1286,10 @@ class Mask:
                  extra_low[2]:-extra_high[2]] += self.mask
 
         # If desired, activate padding cells
-        if cell_padding_size > 0:
+        if cell_padding_width > 0:
             all_cell_centres = self.get_cell_centres()
             target_cell_centres = target_mask.get_cell_centres()
-            max_dist = cell_padding_size + np.sqrt(3) * self.cell_size
+            max_dist = cell_padding_width + np.sqrt(3) * self.cell_size
 
             tree = cKDTree(all_cell_centres)    # No wrapping necessary here!
 
