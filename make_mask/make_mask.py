@@ -325,7 +325,7 @@ class MakeMask:
             for icoord, prefix in enumerate(names):
                 centre[icoord] = vr_file[f'{prefix}cminpot'][vr_index]
 
-        r_highres = max(r_r200, r_r500)
+        r_highres = max(r_r200, r_r500) + self.params['highres_radius_buffer']
         if r_highres <= 0:
             raise ValueError(
                 f"Invalid radius of high-res region ({r_highres})")
