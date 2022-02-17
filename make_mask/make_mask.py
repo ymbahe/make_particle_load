@@ -8,10 +8,12 @@ import numpy as np
 from typing import Tuple
 from warnings import warn
 from scipy import ndimage
+from scipy.spatial import cKDTree
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpi4py import MPI
+
 
 from pdb import set_trace
 
@@ -27,6 +29,7 @@ sys.path.append(
         "tools"
     )
 )
+import crossref as xr
 
 # Load utilities, with safety checks to make sure that they are accessible
 try:
@@ -435,24 +438,29 @@ class MakeMask:
         # and any padding around it
         self.region = self.find_enclosing_frame()
 
-        # Load IDs of particles within target high-res region, and those
-        # that lie within the surrounding padding zone. Only particles assigned
-        # to the current MPI rank are loaded, which may be none.
-        target_ids, pad_ids = self.load_primary_ids()
+        # Load IDs of all possibly relevant particles, and the (sub-)indices
+        # of those lying in the target region and within the surrounding
+        # padding zone. Only particles assigned to the current MPI rank are "
+        # loaded, which may be none.
+        ids, inds_target, inds_pad = self.load_primary_ids()
 
         # If desired, identify additional padding particles in other snapshots.
         # This is currently only possible in non-MPI runs.
-        # ** NOT IMPLEMENTED YET **
-        if self.params['padding_snaps'] is not None:
-            pad_ids = self.load_extra_pad_ids(target_ids, pad_ids)
+        if (self.params['padding_snaps'] is not None and
+            not self.params['pad_full_cells']):
+            inds_pad = self.find_extra_pad_particles(
+                ids, inds_target, inds_pad)
         
-        # Find initial positions from particle IDs (recall that these are
-        # really Peano-Hilbert indices). Coordinates are in the same units
-        # as the box size, centred (and wrapped) on the high-res target region.
-        ic_coords = self.compute_ic_positions(ids)
+        # Find initial (Lagrangian) positions of particles from their IDs
+        # (recall that these are really Peano-Hilbert indices).
+        # Coordinates are in the same units as the box size, centred "
+        # on the high-res target region and periodically wrapped.
+        self.lagrangian_coords = self.compute_ic_positions(ids)
 
-        # Find the corners of a box enclosing all particles in the ICs.
-        box, widths = self.compute_bounding_box(ic_coords)
+        # Find the corners of a box enclosing all particles in the ICs that
+        # are so far identified as "to be treated as high-res"
+        box, widths = self.compute_bounding_box(inds_target, inds_pad)
+
         if comm_rank == 0:
             print(
                 f"Determined bounding box edges in ICs (re-centred):\n"
@@ -462,8 +470,8 @@ class MakeMask:
         # For simplicity, shift the coordinates relative to geometric box
         # center, so that particles extend equally far in each direction
         geo_centre = box[0, :] + widths / 2
-        ic_coords -= geo_centre
-        self.ic_coords = ic_coords
+        self.lagrangian_coords -= geo_centre
+        self.lagrangian_coords = ic_coords
 
         # Also need to keep track of the mask centre in the original frame.
         self.mask_centre = self.params['centre'] + geo_centre
@@ -478,10 +486,22 @@ class MakeMask:
         #
         # We make the mask larger than the actual particle extent, as a safety
         # measure (**TODO**: check whether this is actually needed)
-        self.mask, edges = self.build_basic_mask(
-            ic_coords, np.max(widths) * padding_factor)
-        self.cell_size = edges[1] - edges[0]
-        self.basic_mask = np.copy(self.mask)
+        # --> Some extra is needed to allow for re-shaping. Do later.
+        self.target_mask, self.full_mask = self.build_basic_mask(
+            lagrangian_coords, inds_target, inds_pad, box)
+
+        self.cell_size = edges[0][1] - edges[0][0]
+
+        # Now apply "stage-2 padding" (for entire target cells)
+        if self.params['pad_full_cells']:
+            full_target_inds = self.find_full_target_indices()
+            inds_pad = self.find_extra_pad_particles(
+                ids, full_target_inds, inds_pad, with_primary_snapshot=True)
+
+        # Expand the mask with updated padding particles. If applicable, this
+        # also adds entire high-res padding cells around those hosting target
+        # particles. The mask is enlarged appropriately to allow refinement.
+        self.full_mask.expand(self.lagrangian_coords[inds_pad, :])
 
         # We only need MPI rank 0 for the rest, since we are done working with
         # individual particles
@@ -492,61 +512,14 @@ class MakeMask:
         # for each of the three projections.
         for idim, name in enumerate(['x-y', 'y-z', 'x-z']):
             print(f"Topological extrision ({idim}/3, {name} plane)...")
-            self.refine_mask(idim)
+            self.full_mask.refine(idim, self.params)
 
-        # Finally, we need to find the centre of all selected mask cells, and
-        # the box enclosing all those cells
-        ind_sel = np.where(self.mask)   # Note: 3-tuple of ndarrays!
-        self.cell_coords = np.vstack(
-            (edges[ind_sel[0]], edges[ind_sel[1]], edges[ind_sel[2]])
-            ).T
-        self.cell_coords += self.cell_size * 0.5
+        self.full_mask.compute_box()
+        mask_offset = self.full_mask.recenter()
+        self.lagrangian_coords -= mask_offset
 
-        # Find the box that (fully) encloses all selected cells, and the
-        # side length of its surrounding cube
-        self.mask_box, self.mask_widths = self.compute_bounding_box(
-            self.cell_coords, serial_only=True)
-        self.mask_box[0, :] -= self.cell_size * 0.5
-        self.mask_box[1, :] += self.cell_size * 0.5
-        self.mask_widths += self.cell_size
-        self.mask_extent = np.max(self.mask_widths)
-        
-        # Need to re-center such that the *mask* is centred on origin.
-        # The basic mask is already centred, but the refinement may have
-        # shifted things a bit.
-        mask_offset = (self.mask_box[1, :] + self.mask_box[0, :]) / 2
-        self.mask_box[0, :] -= mask_offset
-        self.mask_box[1, :] -= mask_offset
-        self.mask_centre += mask_offset
-        self.cell_coords -= mask_offset
-        self.ic_coords -= mask_offset
-        print(f"Re-centred mask by {mask_offset} Mpc.") 
-        
-        print(
-            f"Encompassing dimensions:\n"
-            f"\tx = {self.mask_widths[0]:.4f} Mpc\n"
-            f"\ty = {self.mask_widths[1]:.4f} Mpc\n"
-            f"\tz = {self.mask_widths[2]:.4f} Mpc\n"
-            f"Bounding length: {self.mask_extent:.4f} Mpc")
+        self.full_mask.get_active_cell_centres()
 
-        box_volume = np.prod(self.mask_widths)
-        n_sel = len(ind_sel[0])
-        cell_fraction = n_sel * self.cell_size**3 / box_volume
-        cell_fraction_cube = n_sel * self.cell_size**3 / self.mask_extent**3
-        print(f'There are {n_sel:d} selected mask cells.')
-        print(f'They fill {cell_fraction * 100:.3f} per cent of the bounding '
-              f'box ({cell_fraction_cube * 100:.3f} per cent of bounding '
-              f'cube).')
-
-        # Final sanity check: make sure that all particles are within cubic
-        # bounding box
-        if (not np.all(box[0, :] - geo_centre >= -self.mask_extent / 2) or
-            not np.all(box[1, :] - geo_centre <= self.mask_extent / 2)):
-            raise ValueError(
-                f"Cubic bounding box around final mask does not enclose all "
-                f"input particles!\n"
-                f"({box}\n   vs. {self.mask_extent:.4f})"
-            )
 
     def find_enclosing_frame(self):
         """
@@ -563,7 +536,8 @@ class MakeMask:
 
         """
         centre = self.params['centre']
-        pad_width = self.params['highres_padding_width']
+        pad_width = max(self.params['highres_padding_width'],
+                        self.params['highres_diffusion_buffer'])
         frame = np.zeros((2, 3))
 
         # If the target region is a sphere, find the enclosing cube
@@ -652,7 +626,7 @@ class MakeMask:
         # Select particles within target region
         l_unit = self.params['length_unit']
         ind_primary = None
-        
+
         if shape == 'sphere':
             if comm_rank == 0:
                 print(f"Clipping to sphere around {cen}, with radius "
@@ -701,7 +675,7 @@ class MakeMask:
         # Make a plot of the selection environment
         self.plot_halo(coords)
 
-        return ids[ind_target], ids[ind_pad]
+        return ids, ind_target, ind_pad
     
     def load_mask_ids(self, primary_ids) -> np.ndarray:
         """
@@ -784,15 +758,19 @@ class MakeMask:
 
         return ic_coords.astype('f8')
 
-    def compute_bounding_box(self, r, serial_only=False):
+    def compute_bounding_box(self, pad=0.0, serial_only=False):
         """
         Find the corners of a box enclosing a set of points across MPI ranks.
 
         Parameters
         ----------
-        r : ndarray(float) [N_part, 3]
+        r : ndarray(float) [N_part, 3] or list thereof
             The coordinates of the `N_part` particles held on this MPI rank.
             The second array dimension holds the x/y/z components per point.
+            If a list, this is assumed to hold multiple such arrays and the
+            box enclosing all of them is determined.
+        pad : float, optional
+            Padding between outermost point and box edge (default: 0).
         serial_only : bool, optional
             Switch to disable cross-MPI comparison of box extent (default:
             False). If True, the return values will generally differ between
@@ -810,13 +788,19 @@ class MakeMask:
 
         """
         box = np.zeros((2, 3))
+        r = self.lagrangian_coords
 
         # Find vertices of local particles (on this MPI rank). If there are
         # none, set lower (upper) vertices to very large (very negative)
         # numbers so that they will not influence the cross-MPI min/max.
-        n_part = r.shape[0]
-        box[0, :] = np.min(r, axis=0) - 0.01 if n_part > 0 else sys.float_info.max
-        box[1, :] = np.max(r, axis=0) + 0.01 if n_part > 0 else -sys.float_info.max
+        if not isinstance(r, list):
+            rlist = [r]
+        for r_curr in rlist:
+            n_part = r_curr.shape[0]
+            box[0, :] = (np.min(r_curr, axis=0) - pad
+                         if n_part > 0 else sys.float_info.max)
+            box[1, :] = (np.max(r_curr, axis=0) + pad
+                         if n_part > 0 else -sys.float_info.max)
 
         # Now compare min/max values across all MPI ranks
         if not serial_only:
@@ -826,7 +810,7 @@ class MakeMask:
 
         return box, box[1, :] - box[0, :]
 
-    def build_basic_mask(self, r, max_width):
+    def build_basic_mask(self, r, inds_target, inds_pad, mask_box):
         """
         Build the basic mask for an input particle distribution.
 
@@ -839,95 +823,165 @@ class MakeMask:
 
         Parameters
         ----------
-        r : ndarray(float) [N_p, 3]
+        r_target : ndarray(float) [N_p, 3]
             The coordinates of (local) particles for which to create the mask.
             They must be shifted such that they lie within +/- `min_width` from
             the origin in each dimension.
-        max_width : float
-            The maximum extent of the mask along all six directions from the
-            origin. It may get shrunk if `max_width` is larger than the whole
-            box, but the mask will always remain centred on the origin. Note
-            that this value must be identical across MPI ranks.
+        r_pad : ndarray(float) [N_p, 3]
+            As r_target, but holding the particles that are only included for
+            padding.
+        mask_box : ndarray(float) [3]
+            The full side length of the mask along each dimension (must be
+            identical across MPI ranks). It is clipped to the box size.
 
         Returns
         -------
-        mask : ndarray(Bool) [N_cell, 3]
-            The constructed boolean mask.
-        edges : ndarray(N_cell + 1)
-            The cell edges (same along each dimension)
-
+        target_mask : Mask object
+            The mask for the target region (without padding).
+        full_mask : Mask object
+            The mask for the entire high-resolution region (with padding).
+        
         """
         # Find out how far from the origin we need to extend the mask
-        width = min(max_width, self.params['box_size'])
+        widths = np.clip(mask_box, 0, self.params['box_size'])
 
         # Work out how many cells we need along each dimension so that the
         # cells remain below the specified threshold size
-        num_bins = int(np.ceil(width / self.params['cell_size_mpc']))
+        num_cells = int(np.ceil(widths / self.params['cell_size_mpc']))
 
         # Compute number of particles in each cell, across MPI ranks
-        n_p, edges = np.histogramdd(
-            r, bins=num_bins, range=[(-width, width)] * 3)
-        n_p = comm.allreduce(n_p, op=MPI.SUM)
+        n_p_target, edges = np.histogramdd(
+            r[inds_target, :], bins=num_cells,
+            range=[(-w/2, w/2) for w in widths]
+        )
+        n_p_pad, edges = np.histogramdd(
+            r[inds_pad, :], bins=num_cells,
+            range=[(-w/2, w/2) for w in widths]
+        )
+        n_p_target = comm.allreduce(n_p_target, op=MPI.SUM)
+        n_p_full = comm.allreduce(n_p_target + n_p_pad, op=MPI.SUM)
 
         # Convert particle counts to True/False mask
-        mask = n_p >= self.params['min_num_per_cell']
+        mask_target = n_p_target >= self.params['min_num_per_cell']
+        mask_full = n_p_full >= self.params['min_num_per_cell']
 
-        return mask, edges[0]   # edges is a 3-tuple
+        return Mask(mask_target, edges), Mask(mask_full, edges)
 
-    def refine_mask(self, idim):
-        """
-        Refine the mask by checking for holes and processing the morphology.
 
-        The refinement is performed iteratively along all slices along the
-        specified axis. It consists of the ndimage operations ...
-
-        The mask array (`self.mask`) is modified in place.
+    def find_full_target_indices(self):
+        """Find all particles that lie within target mask cells.
 
         Parameters
         ----------
-        idim : int
-            The perpendicular to which slices of the mask are to be processed
-            (0: x, 1: y, 2: z)
+        lagrangian_coords : ndarray(float) [N_p, 3]
+            The Lagrangian coordinates of all possibly relevant particles.
 
         Returns
         -------
-        None
+        indices : ndarray(int)
+            The indices (within `lagrangian_coords`) of those particles that
+            occupy target cells.
 
         """
-        # Process each layer (slice) of the mask in turn
-        for layer_id in range(self.mask.shape[idim]):
+        cell_indices = coordinate_to_cell(
+            self.lagrangian_coords, self.cell_size, self.target_mask.shape)
 
-            # Since each dimension loops over a different axis, set up an
-            # index for the current layer
-            if idim == 0:
-                index = np.s_[layer_id, :, :]
-            elif idim == 1:
-                index = np.s_[:, layer_id, :]
-            elif idim == 2:
-                index = np.s_[:, :, layer_id]
-            else:
-                raise ValueError(f"Invalid value idim={idim}!")
+        # First cut: particles that are in valid mask region
+        ind_in_mask = np.nonzero(
+            (np.min(cell_indices, axis=1) >= 0) &
+            (cell_indices[:, 0] < self.target_mask.shape[0]) &
+            (cell_indices[:, 1] < self.target_mask.shape[1]) &
+            (cell_indices[:, 2] < self.target_mask.shape[2])
+        )[0]
 
-            # Step 1: fill holes in the mask
-            if self.params['topology_fill_holes']:
-                self.mask[index] = (
-                    ndimage.binary_fill_holes(self.mask[index]).astype(bool)
+        # Second cut: particles that are in activated mask cells
+        subind_target = np.nonzero(
+            self.target_mask[
+                cell_indices[ind_in_mask, 0],
+                cell_indices[ind_in_mask, 1],
+                cell_indices[ind_in_mask, 2]
+            ]
+        )[0]
+
+        print(f"Out of {self.lagrangian_coords.shape[0]} particles, "
+              f"{len(subind_target)} lie in a target mask cell.")
+
+        return ind_in_mask[subind_target]
+
+    def find_extra_pad_particles(
+        self, ids, inds_target, inds_pad, with_primary_snapshot=False):
+        """
+        Identify particles close to target particles in a snapshot.
+
+        Parameters
+        ----------
+        ids : ndarray(int)
+            The IDs of all potentially relevant particles.
+        inds_target : ndarray(int)
+            The indices (within `ids`) of target particles, i.e. those whose
+            neighbours are to be found.
+        inds_pad : ndarray(int)
+            The indices (within `ids`) of already identified neighbours.
+        with_primary_snapshot : bool, optional
+            Should the primary snapshot be included in the search? Default: no.
+
+        Returns
+        -------
+        inds_pad : ndarray(int)
+            Updated list of neighbour indices. This is guaranteed to include
+            at least thosee particles that were in the list on input.
+
+        Notes
+        -----
+        This function is not (yet?) MPI parallelized. An error will be thrown
+        if it is called with more than one MPI rank.
+
+        Since the location of the particles cannot be known in advance, the
+        entire coordinate array has to be read in (except for the primary
+        snapshot, if included).
+
+        """
+        if comm_size > 1:
+            raise ValueError("Finding extra padding particles does not work "
+                             "over MPI. Sorry.")
+
+        snaps = self.params['padding_snaps']
+        if with_primary_snapshot:
+            snaps = np.concatenate(([self.params['primary_snapshot']], snaps))
+
+        for snap in snaps:
+            snap_file = self.params['snapshot_base'] + f'{snap:04d}.hdf5'
+            with h5.File(snap_file, 'r') as f:
+                snap_ids = f['PartType1/ParticleIDs'][...]
+                snap_pos = f['PartType1/Coordinates'][...]
+
+            inds, in_snap = xr.find_id_indices(ids, snap_ids)
+            if len(in_snap) < len(inds):
+                raise ValueError(
+                    f"Could only locate {len(in_snap)} out of "
+                    f"{len(inds)} particles in snapshot {snap}!"
                 )
-            # Step 2: regularize the morphology
-            if self.params['topology_dilation_niter'] > 0:
-                self.mask[index] = (
-                    ndimage.binary_dilation(
-                        self.mask[index],
-                        iterations=self.params['topology_dilation_niter']
-                    ).astype(bool)
-                )
-            if self.params['topology_closing_niter'] > 0:
-                self.mask[index] = (
-                    ndimage.binary_closing(
-                        self.mask[index],
-                        iterations=self.params['topology_closing_niter']
-                    ).astype(bool)
-                )
+            r = snap_pos[inds, :]
+            r_target = r[inds_target, :]
+
+            target_tree = cKDTree(r_target, boxsize=self.params['box_size'])
+            ngb_tree = cKDTree(r, boxsize=self.params['box_size'])
+
+            ngbs_lol = ngb_tree.query_ball_tree(
+                target_tree, r=self.params['highres_padding_width'])
+            is_tagged = np.zeros(len(inds), dtype=bool)
+            for ii in len(inds):
+                is_tagged[ngbs_lol[ii]] = True
+
+            inds_tagged = np.nonzero(is_tagged)[0]
+            inds_pad = np.unique(np.concatenate((inds_pad, inds_tagged)))
+
+        return inds_pad
+
+    def expand_full_mask(self, mask, r, inds_pad):
+        """Expand the given mask by the particles specified in r."""
+
+
 
     def plot(self, max_npart_per_rank=int(1e5)):
         """
@@ -1134,9 +1188,6 @@ class MakeMask:
         """
         Save the generated mask for further use.
 
-        Note that, for consistency with IC GEN, all length dimensions must
-        be in units of h^-1. This is already taken care of.
-
         Only rank 0 should do this, but we'll check just to be sure...
 
         Returns
@@ -1157,32 +1208,262 @@ class MakeMask:
             for param_attr in self.params:
                 g.attrs.create(param_attr, self.params[param_attr])
 
-            # Main output is the centres of selected mask cells
-            ds = f.create_dataset(
-                'Coordinates', data=np.array(self.cell_coords, dtype='f8')
-            )
-            ds.attrs.create('Description',
-                            "Coordinates of the centres of selected mask "
-                            "cells [Mpc]. The (uniform) cell width is stored "
-                            "as the attribute `grid_cell_width`.")
-
-            db = f.create_dataset(
-                'BasicMask', data=np.array(self.basic_mask))
-            db.attrs.create('Description', "Unrefined boolean mask.")
-
-            # Store attributes directly related to the mask as HDF5 attributes.
-            ds.attrs.create('mask_corners', self.mask_box)
-            ds.attrs.create('bounding_length', self.mask_extent)
-            ds.attrs.create('box_size', self.params['box_size'])
-            ds.attrs.create('geo_centre', self.mask_centre)
-            ds.attrs.create('grid_cell_width', self.cell_size)
             if self.params['shape'] in ['cuboid', 'slab']:
                 high_res_volume = np.prod(self.params['dim'])
             else:
                 high_res_volume = 4 / 3. * np.pi * self.params['hr_radius']**3
-            ds.attrs.create('high_res_volume', high_res_volume)
+            g.attrs.create('high_res_volume', high_res_volume)
+
+            # Main output is the centres of selected mask cells
+            self.full_mask.write(f)
+            self.target_mask.write(f, subgroup=TargetMask)
 
         print(f"Saved mask data to file `{outloc}`.")
+
+
+class Mask:
+    """Low-level class to represent one individual mask."""
+
+    def __init__(self, mask_array, mask_edges):
+        self.mask = mask_array
+        self.edges = mask_edges
+
+        self.shape = np.array(self.mask.shape)
+        self.cell_size = self.edges[0][1] - self.edges[0][0]
+
+    def expand(self, r, target_mask=None, cell_padding_size=0,
+               refinement_allowance=None):
+        """
+        Expand the mask to accommodate additional particles and cells.
+
+        In addition to the specified particles, two optional expansions can
+        be performed: (i) cells within a given distance from a target
+
+        """
+
+        cell_indices = coordinate_to_cell(r, self.cell_size, self.shape)
+
+        if cell_padding_size > 0:
+            if target_mask is None:
+                raise ValueError("Must provide target mask!")
+            cell_pad_extra = cell_padding_size*2
+
+        if refinement_allowance is not None:
+            ref_extra = np.ceil(target_mask.shape * refinement_allowance[0])
+            ref_extra_min = refinement_allowance[1]
+            ref_extra = np.maximum(ref_extra, ref_extra_min).astype(int)
+
+        uniform_extra = np.maximum(cell_pad_extra, ref_extra)
+
+        extra_low = np.abs(np.min(cell_indices, axis=0))
+        extra_low = np.maximum(extra_low, uniform_extra)
+        extra_high = np.max(cell_indices, axis=0) - self.shape
+        extra_high = np.maximum(extra_high, uniform_extra)
+
+        new_shape = self.shape + extra_low + extra_high
+
+        new_edges = []
+        for idim in range(3):
+            new_min = self.edges[idim][0] - self.cell_size * extra_low
+            new_max = self.edges[idim][-1] + self.cell_size * extra_high
+            new_edges.append(np.arange(new_min, new_max, self.cell_size))
+
+        # Compute number of particles in each cell, across MPI ranks
+        n_p, edges = np.histogramdd(r, bins=new_edges)
+        n_p = comm.allreduce(n_p, op=MPI.SUM)
+
+        # Convert particle counts to True/False mask
+        new_mask = n_p >= self.params['min_num_per_cell']
+
+        # Add in old mask
+        new_mask[extra_low[0]:-extra_high[0],
+                 extra_low[1]:-extra_high[1],
+                 extra_low[2]:-extra_high[2]] += self.mask
+
+        # If desired, activate padding cells
+        if cell_padding_size > 0:
+            all_cell_centres = self.get_cell_centres()
+            target_cell_centres = target_mask.get_cell_centres()
+            max_dist = cell_padding_size + np.sqrt(3) * self.cell_size
+
+            tree = cKDTree(all_cell_centres)    # No wrapping necessary here!
+
+            for ix in range(target_mask.shape[0]):
+                for iy in range(target_mask.shape[1]):
+                    for iz in range(target_mask.shape[2]):
+
+                        # Only expand around active target mask cells!
+                        if not target_mask.mask[ix, iy, iz]:
+                            continue
+
+                        r_target = target_cell_centres[ix, iy, iz]
+                        ngbs = tree.query_ball_point(r_target, max_dist)
+                        ngbs_3d = np.unravel_index(ngbs, new_shape)
+                        new_mask[ngbs_3d] = True 
+
+    def get_cell_centres(self, active_only=False)
+        """Find the centres of all cells (optionally: active ones only)."""
+        all_cell_centres_grid = np.meshgrid(
+            (self.edges[0][1:] + self.edges[0][:-1]) / 2,
+            (self.edges[1][1:] + self.edges[1][:-1]) / 2,
+            (self.edges[2][1:] + self.edges[2][:-1]) / 2
+        )
+
+        ncells = np.prod(self.new_shape)
+        all_cell_centres = np.zeros((ncells, 3))
+        for idim in range(3):
+            all_cell_centres[:, idim] = all_cell_centres_grid[idim].ravel()
+
+        return all_cell_centres
+
+    def refine(self, idim, params):
+        """
+        Refine the mask by checking for holes and processing the morphology.
+
+        The refinement is performed iteratively along all slices along the
+        specified axis. It consists of the ndimage operations ...
+
+        The mask array (`mask`) is modified in place.
+
+        Parameters
+        ----------
+        idim : int
+            The perpendicular to which slices of the mask are to be processed
+            (0: x, 1: y, 2: z)
+
+        Returns
+        -------
+        None
+
+        """
+        mask = self.mask
+
+        # Process each layer (slice) of the mask in turn
+        for layer_id in range(mask.shape[idim]):
+
+            # Since each dimension loops over a different axis, set up an
+            # index for the current layer
+            if idim == 0:
+                index = np.s_[layer_id, :, :]
+            elif idim == 1:
+                index = np.s_[:, layer_id, :]
+            elif idim == 2:
+                index = np.s_[:, :, layer_id]
+            else:
+                raise ValueError(f"Invalid value idim={idim}!")
+
+            # Step 1: fill holes in the mask
+            if params['topology_fill_holes']:
+                mask[index] = (
+                    ndimage.binary_fill_holes(mask[index]).astype(bool)
+                )
+            # Step 2: regularize the morphology
+            if params['topology_dilation_niter'] > 0:
+                mask[index] = (
+                    ndimage.binary_dilation(
+                        mask[index],
+                        iterations=params['topology_dilation_niter']
+                    ).astype(bool)
+                )
+            if params['topology_closing_niter'] > 0:
+                mask[index] = (
+                    ndimage.binary_closing(
+                        mask[index],
+                        iterations=params['topology_closing_niter']
+                    ).astype(bool)
+                )
+
+    def compute_box(self):
+        """Compute the boundary of active cells."""
+        # Find the box that (fully) encloses all selected cells, and the
+        # side length of its surrounding cube
+        ind_sel = np.where(self.mask)   # 3-tuple of ndarrays!
+        self.mask_box = np.zeros((2, 3))
+        for idim in range(3):
+            min_index = np.min(ind_sel[idim])
+            max_index = np.max(ind_sel[idim])
+            self.mask_box[0, idim] = self.edges[min_index]
+            self.mask_box[1, idim] = self.edges[max_index + 1]
+
+        self.mask_widths = self.mask_box[1, :] - self.mask_box[0, :]
+        self.mask_extent = np.max(self.mask_widths)
+
+        self.box_volume = np.prod(self.mask_widths)
+
+        print(
+            f"Encompassing dimensions:\n"
+            f"\tx = {self.mask_widths[0]:.4f} Mpc\n"
+            f"\ty = {self.mask_widths[1]:.4f} Mpc\n"
+            f"\tz = {self.mask_widths[2]:.4f} Mpc\n"
+            f"Bounding length: {self.mask_extent:.4f} Mpc")
+
+    def recenter(self):
+        """Re-center the mask such that the selection is centred on origin."""
+        mask_offset = (self.mask_box[1, :] + self.mask_box[0, :]) / 2
+        self.mask_box[0, :] -= mask_offset
+        self.mask_box[1, :] -= mask_offset
+        self.mask_centre += mask_offset
+        for idim in range(3):
+            self.edges[idim] -= mask_offset
+
+        print(f"Re-centred mask by {mask_offset} Mpc.") 
+        return mask_offset
+
+
+    def get_active_cell_centres(self):
+        """Find the centre of all selected mask cells"""
+        ind_sel = np.where(self.mask)   # Note: 3-tuple of ndarrays!
+        self.cell_coords = np.vstack(
+            (self.edges[ind_sel[0]],
+             self.edges[ind_sel[1]],
+             self.edges[ind_sel[2]]
+            )
+        ).T
+        self.cell_coords += self.cell_size * 0.5
+
+        n_sel = len(ind_sel[0])
+        cell_fraction = n_sel * self.cell_size**3 / self.box_volume
+        cell_fraction_cube = n_sel * self.cell_size**3 / self.mask_extent**3
+        print(f'There are {n_sel:d} selected mask cells.')
+        print(f'They fill {cell_fraction * 100:.3f} per cent of the bounding '
+              f'box ({cell_fraction_cube * 100:.3f} per cent of bounding '
+              f'cube).')
+
+    def write(self, f, subgroup=None):
+        """Write the mask data to an HDF5 file (handle f)."""
+
+        if subgroup is not None:
+            g = f.create_group(subgroup)
+        else:
+            g = f
+
+        ds = g.create_dataset(
+            'Coordinates', data=np.array(self.cell_coords, dtype='f8'))
+        ds.attrs.create('Description',
+                        "Coordinates of the centres of selected mask "
+                        "cells [Mpc]. The (uniform) cell width is stored "
+                        "as the attribute `grid_cell_width`.")
+
+        # Store attributes directly related to the mask as HDF5 attributes.
+        ds.attrs.create('mask_corners', self.mask_box)
+        ds.attrs.create('bounding_length', self.mask_extent)
+        ds.attrs.create('geo_centre', self.mask_centre)
+        ds.attrs.create('grid_cell_width', self.cell_size)
+
+        # Also store full regular mask structure
+        ds = g.create_dataset(
+            'FullMask', data=np.array(self.mask))
+        ds.attrs.create(
+            'Description',
+            'Full boolean mask as 3D array. Cells that are True correspond '
+            'to selected volume.')
+        ds.attrs.create('x_edges', self.edges[0])
+        ds.attrs.create('y_edges', self.edges[1])
+        ds.attrs.create('z_edges', self.edges[2])
+        ds.attrs.create('mask_corners', self.mask_box)
+        ds.attrs.create('bounding_length', self.mask_extent)
+        ds.attrs.create('geo_centre', self.mask_centre)
+        ds.attrs.create('grid_cell_width', self.cell_size)
 
 
 def periodic_wrapping(r, boxsize, return_copy=False):

@@ -544,7 +544,7 @@ class ParticleLoad:
             with h5.File(mask_file, 'r') as f:
                 
                 # Centre of the high-res zoom in region
-                lbox_mpc = f['Coordinates'].attrs.get('box_size')
+                lbox_mpc = f['Params'].attrs.get('box_size')
                 self.sim_box['l_mpc'] = lbox_mpc
                 self.sim_box['volume_mpc'] = self.sim_box['l_mpc']**3
 
