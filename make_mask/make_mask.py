@@ -177,7 +177,7 @@ class MakeMask:
 
             if 'snapshot_file' not in params:
                 params['snapshot_file'] = params['snapshot_base'].replace(
-                    '$isnap', params['primary_snapshot'])
+                    '$isnap', f"{params['primary_snapshot']:04d}")
 
             # Run checks for automatic group selection
             if params['select_from_vr']:
@@ -476,7 +476,6 @@ class MakeMask:
         # center, so that particles extend equally far in each direction
         geo_centre = box[0, :] + widths / 2
         self.lagrangian_coords -= geo_centre
-        self.lagrangian_coords = ic_coords
 
         # Also need to keep track of the mask centre in the original frame.
         self.mask_centre = self.params['centre'] + geo_centre
@@ -493,7 +492,7 @@ class MakeMask:
         # measure (**TODO**: check whether this is actually needed)
         # --> Some extra is needed to allow for re-shaping. Do later.
         self.target_mask, self.full_mask = self.build_basic_mask(
-            lagrangian_coords, inds_target, inds_pad, box)
+            self.lagrangian_coords, inds_target, inds_pad, box)
 
         self.cell_size = edges[0][1] - edges[0][0]
 
@@ -607,7 +606,7 @@ class MakeMask:
                 f"Only SWIFT input supported, not {self.params['data_type']}.")
 
         elif self.params['data_type'].lower() == 'swift':
-            snap = read_swift(self.params['snap_file'], comm=comm)
+            snap = read_swift(self.params['snapshot_file'], comm=comm)
             self.params['box_size'] = float(snap.HEADER['BoxSize'])
             self.params['h_factor'] = float(snap.COSMOLOGY['h'])
             self.params['length_unit'] = 'Mpc'
@@ -765,7 +764,8 @@ class MakeMask:
 
         return ic_coords.astype('f8')
 
-    def compute_bounding_box(self, pad=0.0, serial_only=False):
+    def compute_bounding_box(
+            self, inds_target, inds_pad, serial_only=False, pad=0.0):
         """
         Find the corners of a box enclosing a set of points across MPI ranks.
 
@@ -795,20 +795,25 @@ class MakeMask:
 
         """
         box = np.zeros((2, 3))
+        box[0, :] = sys.float_info.max
+        box[1, :] = sys.float_info.min
         r = self.lagrangian_coords
 
         # Find vertices of local particles (on this MPI rank). If there are
         # none, set lower (upper) vertices to very large (very negative)
         # numbers so that they will not influence the cross-MPI min/max.
-        if not isinstance(r, list):
-            rlist = [r]
-        for r_curr in rlist:
-            n_part = r_curr.shape[0]
-            box[0, :] = (np.min(r_curr, axis=0) - pad
-                         if n_part > 0 else sys.float_info.max)
-            box[1, :] = (np.max(r_curr, axis=0) + pad
-                         if n_part > 0 else -sys.float_info.max)
+        for inds in [inds_target, inds_pad]:
+            n_part = len(inds)
+            r_curr = r[inds, :]
 
+            min_curr = (np.min(r_curr, axis=0) - pad
+                        if n_part > 0 else sys.float_info.max)
+            box[0, :] = np.minimum(box[0, :], min_curr)
+        
+            max_curr = (np.max(r_curr, axis=0) + pad
+                        if n_part > 0 else -sys.float_info.max)
+            box[1, :] = np.maximum(box[1, :], max_curr)
+           
         # Now compare min/max values across all MPI ranks
         if not serial_only:
             for idim in range(3):
@@ -854,9 +859,10 @@ class MakeMask:
 
         # Work out how many cells we need along each dimension so that the
         # cells remain below the specified threshold size
-        num_cells = int(np.ceil(widths / self.params['cell_size_mpc']))
+        num_cells = np.ceil(widths / self.params['cell_size_mpc']).astype(int)
 
         # Compute number of particles in each cell, across MPI ranks
+        set_trace()
         n_p_target, edges = np.histogramdd(
             r[inds_target, :], bins=num_cells,
             range=[(-w/2, w/2) for w in widths]
@@ -880,8 +886,7 @@ class MakeMask:
 
         Parameters
         ----------
-        lagrangian_coords : ndarray(float) [N_p, 3]
-            The Lagrangian coordinates of all possibly relevant particles.
+        None
 
         Returns
         -------
@@ -957,9 +962,9 @@ class MakeMask:
             snaps = np.concatenate(([self.params['primary_snapshot']], snaps))
 
         for snap in snaps:
-            snap_base = self.params['snapshot_base']
-            snap_file = snap_base.replace('$isnap', f'{snap:04d}')
-            with h5.File(snap_file, 'r') as f:
+            snapshot_base = self.params['snapshot_base']
+            snapshot_file = snapshot_base.replace('$isnap', f'{snap:04d}')
+            with h5.File(snapshot_file, 'r') as f:
                 snap_ids = f['PartType1/ParticleIDs'][...]
                 snap_pos = f['PartType1/Coordinates'][...]
 
@@ -1000,10 +1005,10 @@ class MakeMask:
 
         # Select a random sub-sample of particle coordinates on each rank and
         # combine them all on rank 0
-        np_ic = self.ic_coords.shape[0]
+        np_ic = self.lagrangian_coords.shape[0]
         n_sample = int(min(np_ic, max_npart_per_rank))
         indices = np.random.choice(np_ic, n_sample, replace=False)
-        plot_coords = self.ic_coords[indices, :]
+        plot_coords = self.lagrangian_coords[indices, :]
         plot_coords = comm.gather(plot_coords)
 
         # Only need rank 0 from here on, combine all particles there.
@@ -1306,7 +1311,7 @@ class Mask:
                         ngbs_3d = np.unravel_index(ngbs, new_shape)
                         new_mask[ngbs_3d] = True 
 
-    def get_cell_centres(self, active_only=False)
+    def get_cell_centres(self, active_only=False):
         """Find the centres of all cells (optionally: active ones only)."""
         all_cell_centres_grid = np.meshgrid(
             (self.edges[0][1:] + self.edges[0][:-1]) / 2,
