@@ -30,6 +30,7 @@ sys.path.append(
     )
 )
 import crossref as xr
+import cosmology as co
 
 # Load utilities, with safety checks to make sure that they are accessible
 try:
@@ -443,6 +444,9 @@ class MakeMask:
         # and any padding around it
         self.region = self.find_enclosing_frame()
 
+        m_part = self.base_particle_mass()
+        self.mips = compute_mips(m_part, params['base_cosmology'])
+
         # Load IDs of all possibly relevant particles, and the (sub-)indices
         # of those lying in the target region and within the surrounding
         # padding zone. Only particles assigned to the current MPI rank are "
@@ -569,6 +573,18 @@ class MakeMask:
                 f"{frame[1, 0]:.2f} / {frame[1, 1]:.2f} / {frame[1, 2]:.2f}"
             )
         return frame
+
+    def base_particle_mass(self):
+        """Load the particle mass of the base simulation."""
+        if comm_rank == 0:
+            with h5.File(self.params['snapshot_file'], 'r') as f:
+                m_part = f['PartType1/Masses'][0] * 1e10
+            print(f'Base simulation particle mass: {m_part:.3e} M_Sun.')
+        else:
+            m_part = None
+
+        self.m_part_base = comm.bcast(m_part)
+        return self.m_part_base
 
     def load_primary_ids(self):
         """
@@ -1469,6 +1485,24 @@ class Mask:
         ds.attrs.create('bounding_length', self.mask_extent)
         ds.attrs.create('geo_centre', self.mask_centre)
         ds.attrs.create('grid_cell_width', self.cell_size)
+
+
+def compute_mips(m_part, cosmo_name):
+    """Compute the total masses in the simulation volume."""
+    cosmo = co.get_cosmology_params(cosmo_name)
+    h = cosmo['hubbleParam']
+    omega0 = cosmo['Omega0']
+    omega_baryon = cosmo['OmegaBaryon']
+    cosmo = FlatLambdaCDM(
+        H0=h*100., Om0=omega0, Ob0=omega_baryon)
+
+    rho_crit = cosmo.critical_density0.to(u.solMass / u.Mpc ** 3).value
+    rho_mean = omega0 * rho_crit
+
+    mips = np.cbrt(m_part / rho_mean)
+    if comm_rank == 0:
+        print(f"Mean inter-particle separation: {mips*1e3:.3f} kpc")
+    return mips
 
 
 def periodic_wrapping(r, boxsize, return_copy=False):
