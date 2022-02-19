@@ -446,6 +446,9 @@ class MakeMask:
 
         m_part = self.base_particle_mass()
         self.mips = compute_mips(m_part, params['base_cosmology'])
+        if self.params['cell_size_mpc'] == 'auto':
+            self.params['cell_size_mpc'] = (
+                self.mips * self.params['cell_size_mips'])
 
         # Load IDs of all possibly relevant particles, and the (sub-)indices
         # of those lying in the target region and within the surrounding
@@ -468,35 +471,37 @@ class MakeMask:
         # Find the corners of a box enclosing all particles in the ICs that
         # are so far identified as "to be treated as high-res". The coordinates
         # are relative to the centre of the box, which is found internally
-        # (accounting for periodic wrapping).
-        box, origin = self.compute_bounding_box(inds_target, inds_pad)
+        # (accounting for periodic wrapping); particle coordinates are also
+        # shifted to this frame.
+        inds_all = np.concatenate((inds_target, inds_pax))
+        box, origin = self.compute_bounding_box(inds_all)
+        box[0, :] -= self.mips * self.params['mask_pad_in_mips']
+        box[1, :] += self.mips * self.params['mask_pad_in_mips']
+        if (min(box) < self.params['box_size'] or
+            max(box) > self.params['box_size']):
+            raise ValueError("")
 
-
-        # For simplicity, shift the coordinates relative to the geometric box
-        # center, so that particles extend equally far in each direction
-        self.lagrangian_coords -= origin
-        periodic_wrapping(self.lagrangian_coords, self.params['boxsize'])
-
-        # Build the basic mask. This is a cubic boolean array with an
-        # adaptively computed cell size and extent that includes at least
-        # twice the entire bounding box. It is True for any cells that contain
-        # at least the specified threshold number of particles.
-        #
-        # We make the mask larger than the actual particle extent, as a safety
-        # measure (**TODO**: check whether this is actually needed)
-        # --> Some extra is needed to allow for re-shaping. Do later.
-        self.target_mask, self.full_mask = self.build_basic_mask(
-            self.lagrangian_coords, inds_target, inds_pad, box)
+        # Build the basic masks. These are 3D Boolean arrays covering the
+        # bounding box computed above.
+        # Cells containing at least the specified threshold number of
+        # (target / target + pad) particles are True, others are False.
+        self.target_mask = Mask(self.lagrangian_coords[inds_target], box)
+        self.full_mask = Mask(self.lagrangian_coords[inds_all], box)
         self.cell_size = self.target_mask.cell_size
+
+        # Record the origin (centre) of the mask in the full simulation box
+        self.target_mask.set_origin(origin)
+        self.full_mask.set_origin(origin)
 
         # Now apply "stage-2 padding" (for entire target cells)
         if self.params['pad_full_cells']:
-            full_target_inds = self.find_full_target_indices()
+            full_target_inds = self.target_mask.find_particles_in_active_cells(
+                self.lagrangian_coords)
             inds_pad = self.find_extra_pad_particles(
                 ids, full_target_inds, inds_pad, with_primary_snapshot=True)
 
-        # Expand the mask with updated padding particles. If applicable, this
-        # also adds entire high-res padding cells around those hosting target
+        # Expand the full mask with updated padding particles. If applicable,
+        # also add entire high-res padding cells around those hosting target
         # particles. The mask is enlarged appropriately to allow refinement.
         self.full_mask.expand(
             self.lagrangian_coords[inds_pad, :],
@@ -629,8 +634,8 @@ class MakeMask:
             print("\nLoading particle data...")
         coords = snap.read_dataset(1, 'Coordinates')
 
-        # Shift coordinates relative to target centre, and wrap them to within
-        # the periodic box
+        # Shift coordinates relative to target centre, and apply periodic
+        # wrapping if required
         cen = self.params['centre']
         coords -= cen
         periodic_wrapping(coords, self.params['box_size'])
@@ -764,19 +769,15 @@ class MakeMask:
         return ic_coords.astype('f8')
 
     def compute_bounding_box(
-            self, inds_target, inds_pad, serial_only=False, pad=0.0):
+        self, inds, serial_only=False, with_wrapping=True):
         """
         Find the corners of a box enclosing a set of points across MPI ranks.
 
         Parameters
         ----------
-        r : ndarray(float) [N_part, 3] or list thereof
-            The coordinates of the `N_part` particles held on this MPI rank.
-            The second array dimension holds the x/y/z components per point.
-            If a list, this is assumed to hold multiple such arrays and the
-            box enclosing all of them is determined.
-        pad : float, optional
-            Padding between outermost point and box edge (default: 0).
+        inds : ndarray(int) or list thereof
+            The particles (indices into self.lagrangian_coords) for which
+            the bounding box should be found.
         serial_only : bool, optional
             Switch to disable cross-MPI comparison of box extent (default:
             False). If True, the return values will generally differ between
@@ -787,46 +788,79 @@ class MakeMask:
         box : ndarray(float) [2, 3]
             The coordinates of the lower and upper vertices of the bounding
             box. These are stored in index 0 and 1 along the first dimension,
-            respectively.
+            respectively. The coordinate frame is shifted w.r.t. that of
+            the input coordinates such that the origin lies in the box centre.
+            Periodic wrapping is applied where necessary, i.e. the values are
+            guaranteed to be <= L/2 (L = parent simulation box size).
+        origin : ndarray(float) [3]
+            The geometric centre of the box, wrapped to 0 --> L.
 
-        widths : ndarray(float) [3]
-            The width of the box along each dimension.
+        Note
+        ----
+        Cases in which the points are split across one or more periodic box
+        edges of the parent simulation are handled, but this does not always
+        work if the points extend by more than L/2 in at least one dimension.
+        An error is thrown if this is the case.
 
         """
-        box = np.zeros((2, 3))
-        box[0, :] = sys.float_info.max
-        box[1, :] = sys.float_info.min
-        r = self.lagrangian_coords
+        origin = np.zeros(3)
 
-        # Find vertices of local particles (on this MPI rank). If there are
-        # none, set lower (upper) vertices to very large (very negative)
-        # numbers so that they will not influence the cross-MPI min/max.
-        for inds in [inds_target, inds_pad]:
-            n_part = len(inds)
-            r_curr = r[inds, :]
+        if isinstance(inds, list):
+            inds = np.concatenate(inds)
 
-            min_curr = (np.min(r_curr, axis=0) - pad
-                        if n_part > 0 else sys.float_info.max)
-            box[0, :] = np.minimum(box[0, :], min_curr)
-        
-            max_curr = (np.max(r_curr, axis=0) + pad
-                        if n_part > 0 else -sys.float_info.max)
-            box[1, :] = np.maximum(box[1, :], max_curr)
-           
-        # Now compare min/max values across all MPI ranks
-        if not serial_only:
+        # Find vertices of particles (cross-MPI)
+        box = find_vertices(
+            self.lagrangian_coords[inds, :], serial_only=serial_only)
+
+        # If we run with wrapping check, see whether we are close to the edge
+        # in one or more dimensions:
+        if with_wrapping:
+            redo = False
+            l_box = self.params['box_size']
             for idim in range(3):
-                box[0, idim] = comm.allreduce(box[0, idim], op=MPI.MIN)
-                box[1, idim] = comm.allreduce(box[1, idim], op=MPI.MAX)
+                if (box[0, idim] < l_box*0.05 and box[1, idim] > l_box*0.95):
+                    redo = True
+                    origin[idim] += l_box * 0.5
+                    self.lagrangian_coords[:, idim] -= (l_box * 0.5)
+
+            if redo:
+                # Wrap (potentially shifted) coordinates back to range 0 --> L
+                periodic_wrapping(self.lagrangian_coords, l_box, mode='corner')
+
+                # Find box again (in shifted frame) and see whether it's better
+                box = find_vertices(
+                    self.lagrangian_coords[inds, :], serial_only=serial_only)
+
+                for idim in range(3):
+                    if (box[0, idim] < l_box * 0.05 and
+                        box[1, idim] > l_box * 0.95):
+                        raise ValueError(
+                            f"Lagrangian coordinates are close to both box "
+                            f"edges in dimension {idim}, both before and "
+                            f"after shifting. This probably means that they "
+                            f"cover >50% of the box size -- I am giving up."
+                        )
+
+        # If we get here, we either don't care about wrapping issues or the
+        # particles are all within the same image of the box. For consistency
+        # and simplicity, shift all coordinates to the box centre:
+        origin += ((box[0, :] + box[1, :]) / 2)
+        self.lagrangian_coords -= origin
+
+        # Although all *selected* particles are guaranteed to be in the same
+        # image of the simulation box, there may be others that are still
+        # wrapped around an edge
+        if with_wrapping:
+            periodic_wrapping(self.lagrangian_coords, l_box)
 
         if comm_rank == 0:
             print(
-                f"Determined Lagrangian bounding box edges:\n"
+                f"Lagrangian bounding box centred on {origin[0]:.3f} / "
+                f"{origin[1]:.3f} / {origin[2]:.3f}, with edges\n"
                 f"\t{box[0, 0]:.3f} / {box[0, 1]:.3f} / {box[0, 2]:.3f} --> "
                 f"{box[1, 0]:.3f} / {box[1, 1]:.3f} / {box[1, 2]:.3f}")
 
-
-        return box, box[1, :] - box[0, :]
+        return box, origin
 
     def build_basic_mask(self, r, inds_target, inds_pad, mask_box):
         """
@@ -868,7 +902,6 @@ class MakeMask:
         num_cells = np.ceil(widths / self.params['cell_size_mpc']).astype(int)
 
         # Compute number of particles in each cell, across MPI ranks
-        set_trace()
         n_p_target, edges = np.histogramdd(
             r[inds_target, :], bins=num_cells,
             range=[(-w/2, w/2) for w in widths]
@@ -887,44 +920,7 @@ class MakeMask:
         return Mask(mask_target, edges), Mask(mask_full, edges)
 
 
-    def find_full_target_indices(self):
-        """Find all particles that lie within target mask cells.
 
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        indices : ndarray(int)
-            The indices (within `lagrangian_coords`) of those particles that
-            occupy target cells.
-
-        """
-        cell_indices = coordinate_to_cell(
-            self.lagrangian_coords, self.cell_size, self.target_mask.shape)
-
-        # First cut: particles that are in valid mask region
-        ind_in_mask = np.nonzero(
-            (np.min(cell_indices, axis=1) >= 0) &
-            (cell_indices[:, 0] < self.target_mask.shape[0]) &
-            (cell_indices[:, 1] < self.target_mask.shape[1]) &
-            (cell_indices[:, 2] < self.target_mask.shape[2])
-        )[0]
-
-        # Second cut: particles that are in activated mask cells
-        subind_target = np.nonzero(
-            self.target_mask[
-                cell_indices[ind_in_mask, 0],
-                cell_indices[ind_in_mask, 1],
-                cell_indices[ind_in_mask, 2]
-            ]
-        )[0]
-
-        print(f"Out of {self.lagrangian_coords.shape[0]} particles, "
-              f"{len(subind_target)} lie in a target mask cell.")
-
-        return ind_in_mask[subind_target]
 
     def find_extra_pad_particles(
         self, ids, inds_target, inds_pad, with_primary_snapshot=False):
@@ -1239,12 +1235,76 @@ class MakeMask:
 class Mask:
     """Low-level class to represent one individual mask."""
 
-    def __init__(self, mask_array, mask_edges):
-        self.mask = mask_array
-        self.edges = mask_edges
+    def __init__(self, r, box):
 
+        # Work out how many cells we need along each dimension so that the
+        # cells remain below the specified threshold size
+        box_widths = box[1, :] - box[0, :]
+        self.cell_size = self.params['cell_size_mpc']
+        num_cells = np.ceil(box_widths / self.cell_size).astype(int)
+
+        # To keep the cells cubic at the specified side length, we need to
+        # extend the mask region slightly beyond the box
+        bin_edges = []
+        for idim in range(3):
+            extent_dim = num_cells[idim] / 2 * self.cell_size
+            bin_edges.append(
+                np.linspace(-extent_dim, extent_dim, num=num_cells+1))
+
+        # Compute the number of particles in each cell, across MPI ranks
+        n_p, edges = np.histogramdd(r, bins=bin_edges)
+        n_p = comm.allreduce(n_p, op=MPI.SUM)
+
+        # Convert particle counts to True/False mask
+        self.mask = (n_p >= self.params['min_num_per_cell'])
+        self.edges = edges
         self.shape = np.array(self.mask.shape)
-        self.cell_size = self.edges[0][1] - self.edges[0][0]
+
+    def set_origin(self, origin):
+        self.origin = origin
+
+    def find_particles_in_active_cells(self, r):
+        """Find all particles that lie within target mask cells.
+
+        Parameters
+        ----------
+        r : ndarray(float)
+            The particles to test against the mask.
+
+        Returns
+        -------
+        indices : ndarray(int)
+            The indices of those particles that occupy active cells.
+
+        """
+        cell_indices = self.coordinates_to_cell(r)
+
+        # First cut: particles that are in valid mask region
+        ind_in_mask = np.nonzero(
+            (np.min(cell_indices, axis=1) >= 0) &
+            (cell_indices[:, 0] < self.shape[0]) &
+            (cell_indices[:, 1] < self.shape[1]) &
+            (cell_indices[:, 2] < self.shape[2])
+        )[0]
+
+        # Second cut: particles that are in activated mask cells
+        subind_target = np.nonzero(
+            self.mask[
+                cell_indices[ind_in_mask, 0],
+                cell_indices[ind_in_mask, 1],
+                cell_indices[ind_in_mask, 2]
+            ]
+        )[0]
+
+        print(f"Out of {r.shape[0]} particles, "
+              f"{len(subind_target)} lie in an active mask cell.")
+
+        return ind_in_mask[subind_target]
+
+    def coordinates_to_cell(self, r):
+        """Find the cells for a given set of coordinates."""
+        cells = ((r - self.box[0, :]) // self.cell_size).astype(int)
+        return cells
 
     def expand(self, r, target_mask=None, cell_padding_width=0,
                refinement_allowance=None):
@@ -1500,7 +1560,28 @@ def compute_mips(m_part, cosmo_name):
     return mips
 
 
-def periodic_wrapping(r, boxsize, return_copy=False):
+def find_vertices(r, serial_only=False):
+    """Find the vertices (lower and upper edges) of points."""
+    box = np.zeros((2, 3))
+    box[0, :] = sys.float_info.max
+    box[1, :] = sys.float_info.min
+
+    n_part = r.shape[0]
+
+    if n_part > 0:
+        box[0, :] = np.min(r, axis=0)
+        box[1, :] = np.max(r, axis=0)
+
+    # Now compare min/max values across all MPI ranks
+    if not serial_only:
+        for idim in range(3):
+            box[0, idim] = comm.allreduce(box[0, idim], op=MPI.MIN)
+            box[1, idim] = comm.allreduce(box[1, idim], op=MPI.MAX)
+
+    return box
+
+
+def periodic_wrapping(r, boxsize, return_copy=False, mode='centre'):
     """
     Apply periodic wrapping to an input set of coordinates.
 
@@ -1514,6 +1595,9 @@ def periodic_wrapping(r, boxsize, return_copy=False):
     return_copy : bool, optional
         Switch to return a (modified) copy of the input array, rather than
         modifying the input in place (which is the default).
+    mode : string, optional
+        Specify whether coordinates should be wrapped to within -0.5 --> 0.5
+        times the boxsize ('centre', default) or 0 --> 1 boxsize ('corner').
 
     Returns
     -------
@@ -1522,14 +1606,21 @@ def periodic_wrapping(r, boxsize, return_copy=False):
         otherwise the input array `r` is modified in-place.
 
     """
+    if mode in ['centre', 'center']:
+        shift = 0.5 * boxsize
+    elif mode in ['corner']:
+        shift = 0.0
+    else:
+        raise ValueError(f'Invalid wrapping mode "{mode}"!')
+
     if return_copy:
-        r_wrapped = ((r + 0.5 * boxsize) % boxsize - 0.5 * boxsize)
+        r_wrapped = ((r + shift) % boxsize - shift)
         return r_wrapped
 
     # To perform the wrapping in-place, break it down into three steps
-    r += 0.5 * boxsize
+    r += shift
     r %= boxsize
-    r -= 0.5 * boxsize
+    r -= shift
 
 
 # Allow using the file as stand-alone script
