@@ -462,44 +462,32 @@ class MakeMask:
         
         # Find initial (Lagrangian) positions of particles from their IDs
         # (recall that these are really Peano-Hilbert indices).
-        # Coordinates are in the same units as the box size, centred "
-        # on the high-res target region and periodically wrapped.
+        # Coordinates are in the same units as the box size.
         self.lagrangian_coords = self.compute_ic_positions(ids)
 
         # Find the corners of a box enclosing all particles in the ICs that
-        # are so far identified as "to be treated as high-res"
-        box, widths = self.compute_bounding_box(inds_target, inds_pad)
+        # are so far identified as "to be treated as high-res". The coordinates
+        # are relative to the centre of the box, which is found internally
+        # (accounting for periodic wrapping).
+        box, origin = self.compute_bounding_box(inds_target, inds_pad)
 
-        if comm_rank == 0:
-            print(
-                f"Determined bounding box edges in ICs (re-centred):\n"
-                f"\t{box[0, 0]:.3f} / {box[0, 1]:.3f} / {box[0, 2]:.3f} --> "
-                f"{box[1, 0]:.3f} / {box[1, 1]:.3f} / {box[1, 2]:.3f}")
 
-        # For simplicity, shift the coordinates relative to geometric box
+        # For simplicity, shift the coordinates relative to the geometric box
         # center, so that particles extend equally far in each direction
-        geo_centre = box[0, :] + widths / 2
-        self.lagrangian_coords -= geo_centre
-        self.lagrangian_coords = ic_coords
-
-        # Also need to keep track of the mask centre in the original frame.
-        self.mask_centre = self.params['centre'] + geo_centre
+        self.mask_centre = (box[0, :] + box[1, :]) / 2
+        self.lagrangian_coords -= self.mask_centre
 
         # Build the basic mask. This is a cubic boolean array with an
         # adaptively computed cell size and extent that includes at least
         # twice the entire bounding box. It is True for any cells that contain
         # at least the specified threshold number of particles.
         #
-        # `edges` holds the spatial coordinate of the lower cell edges. By
-        # construction, this is the same along all three dimensions.
-        #
         # We make the mask larger than the actual particle extent, as a safety
         # measure (**TODO**: check whether this is actually needed)
         # --> Some extra is needed to allow for re-shaping. Do later.
         self.target_mask, self.full_mask = self.build_basic_mask(
             lagrangian_coords, inds_target, inds_pad, box)
-
-        self.cell_size = edges[0][1] - edges[0][0]
+        self.cell_size = self.target_mask.cell_size
 
         # Now apply "stage-2 padding" (for entire target cells)
         if self.params['pad_full_cells']:
@@ -525,6 +513,7 @@ class MakeMask:
             print(f"Topological extrision ({idim}/3, {name} plane)...")
             self.full_mask.refine(idim, self.params)
 
+        # Re-center the full mask to account for possible shifts
         self.full_mask.compute_box()
         mask_offset = self.full_mask.recenter()
         self.lagrangian_coords -= mask_offset
@@ -738,9 +727,7 @@ class MakeMask:
         Returns
         -------
         coords : ndarray(float)
-            The coordinates of particles in the ICs [Mpc]. They are shifted
-            (and wrapped) such that the centre of the high-res region is at
-            the origin.
+            The coordinates of particles in the ICs [Mpc].
         """
         print(f"[Rank {comm_rank}] Computing initial positions of dark matter "
               "particles...")
@@ -774,14 +761,9 @@ class MakeMask:
         cell_size = self.params['box_size'] / 2**self.params['bits']
         ic_coords = (ic_coords.astype('float') + 0.5) * cell_size
 
-        # Shift coordinates to the centre of target high-resolution region and
-        # apply periodic wrapping
-        ic_coords -= self.params['centre']
-        periodic_wrapping(ic_coords, self.params['box_size'])
-
         return ic_coords.astype('f8')
 
-    def compute_bounding_box(self, pad=0.0, serial_only=False):
+    def compute_bounding_box(self, inds_target, pad=0.0, serial_only=False):
         """
         Find the corners of a box enclosing a set of points across MPI ranks.
 
@@ -830,6 +812,13 @@ class MakeMask:
             for idim in range(3):
                 box[0, idim] = comm.allreduce(box[0, idim], op=MPI.MIN)
                 box[1, idim] = comm.allreduce(box[1, idim], op=MPI.MAX)
+
+        if comm_rank == 0:
+            print(
+                f"Determined Lagrangian bounding box edges:\n"
+                f"\t{box[0, 0]:.3f} / {box[0, 1]:.3f} / {box[0, 2]:.3f} --> "
+                f"{box[1, 0]:.3f} / {box[1, 1]:.3f} / {box[1, 2]:.3f}")
+
 
         return box, box[1, :] - box[0, :]
 
