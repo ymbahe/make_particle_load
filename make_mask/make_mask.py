@@ -492,6 +492,7 @@ class MakeMask:
         # Record the origin (centre) of the mask in the full simulation box
         self.target_mask.set_origin(origin)
         self.full_mask.set_origin(origin)
+        self.full_mask.set_simulation_box_size(self.params['box_size'])
 
         # Now apply "stage-2 padding" (for entire target cells)
         if self.params['pad_full_cells']:
@@ -520,10 +521,15 @@ class MakeMask:
 
         # Re-center the full mask to account for possible shifts
         # (this does not involve any particles)
-        self.full_mask.compute_box()
+        self.full_mask.compute_active_box()
+        self.full_mask.recenter()
 
-        mask_offset = self.full_mask.recenter()
+        # Compute the centres of active cells (key output)
         self.full_mask.get_active_cell_centres()
+
+    # ------------------------------------------------------------------------
+    # ------------ Sub-functions of make_mask() ------------------------------
+    # ------------------------------------------------------------------------
 
     def find_enclosing_frame(self):
         """
@@ -918,9 +924,6 @@ class MakeMask:
 
         return Mask(mask_target, edges), Mask(mask_full, edges)
 
-
-
-
     def find_extra_pad_particles(
         self, ids, inds_target, inds_pad, with_primary_snapshot=False):
         """
@@ -1262,6 +1265,9 @@ class Mask:
     def set_origin(self, origin):
         self.origin = origin
 
+    def set_simulation_box_size(self, l_box):
+        self.l_box = l_box
+
     def find_particles_in_active_cells(self, r):
         """Find all particles that lie within target mask cells.
 
@@ -1452,10 +1458,8 @@ class Mask:
                     ).astype(bool)
                 )
 
-    def compute_box(self):
+    def compute_active_box(self):
         """Compute the boundary of active cells."""
-        # Find the box that (fully) encloses all selected cells, and the
-        # side length of its surrounding cube
         ind_sel = np.where(self.mask)   # 3-tuple of ndarrays!
         self.mask_box = np.zeros((2, 3))
         for idim in range(3):
@@ -1492,9 +1496,19 @@ class Mask:
         for idim in range(3):
             self.edges[idim] -= mask_offset[idim]
 
+        # Check that mask_box does not extend by more than half the
+        # simulation box size from the centre in any direction
+        low = np.min(self.mask_box[0, :])
+        high = np.max(self.mask_box[1, :])
+        if (low < -0.5 * self.l_box or high > 0.5 * self.l_box):
+            raise ValueError(
+                f"Active mask cells extend from {low:.3f} --> {high:.3f} Mpc, "
+                f"which exceeds the simulation half-box size "
+                f"({self.l_box / 2:.2f} Mpc). This is not supported."
+            )
+
         print(f"Re-centred mask by {mask_offset[0]:.3f} / "
               f"{mask_offset[1]:.3f} / {mask_offset[2]:.3f} Mpc.")
-        return mask_offset
 
     def get_active_cell_centres(self):
         """Find the centre of all selected mask cells"""
