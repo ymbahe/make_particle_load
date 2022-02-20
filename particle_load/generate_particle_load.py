@@ -210,7 +210,10 @@ class ParticleLoad:
             'zone1_gcell_load': 1331, 
             'zone1_type': "glass",
             'zone2_type': "glass",
-            'zone2_mass_factor_per_mpc': 1.0,
+            'zone2_mpart_factor_per_mpc': 1.0,
+            'zone2_min_mpart_over_zone1': 1.5,
+            'zone2_max_mpart_over_zone1': None,
+            'zone2_max_mpart_msun': None,
             'zone3_ncell_factor': 0.5,
             'zone3_min_n_cells': 20,
             'zone3_max_n_cells': 1000,
@@ -731,6 +734,7 @@ class ParticleLoad:
         # Side length of one gcell
         gcube['cell_size_mpc'] = self.sim_box['l_mpc'] / n_base
         gcube['cell_size'] = 1. / n_base   # In sim box size units
+        gcube['cell_volume'] = gcube['cell_size']**3
 
         if self.config['is_zoom']:
             # In this case, we have fewer gcells (in general), but still
@@ -1285,9 +1289,8 @@ class ParticleLoad:
         zone1_gcell_load = self.config['zone1_gcell_load']
         zone1_type = self.config['zone1_type']
         zone2_type = self.config['zone2_type']
-        zone2_mass_factor = (self.config['zone2_mass_factor_per_mpc'] *
+        zone2_mass_factor = (self.config['zone2_mpart_factor_per_mpc'] *
                              self.gcube['cell_size_mpc'])
-        min_gcell_load = self.config['min_gcell_load']
 
         # Number of high resolution particles this rank will have.
         gcell_info = {
@@ -1298,7 +1301,10 @@ class ParticleLoad:
             'num_types': num_gcell_types
         }
 
-        gcell_volume_fraction = self.gcube['cell_size']**3
+        # Find allowed range of loads for Zone-II gcells
+        # (do this now already, because zone1_gcell_load is assumed to be
+        # correct, i.e. the exact value that will actually be used).
+        zone2_load_range = self.find_zone2_load_range(zone1_gcell_load)
 
         # Analyse each gcell type in turn
         for itype in range(num_gcell_types):
@@ -1317,15 +1323,28 @@ class ParticleLoad:
             else:
                 zone_type = zone2_type
                 reduction_factor = zone2_mass_factor * itype
-                target_gcell_load = int(np.ceil(
-                    max(min_gcell_load, zone1_gcell_load / reduction_factor)))
+                target_gcell_load = (
+                    max(min_zone2_load, zone1_gcell_load / reduction_factor))
+                target_gcell_load = min(target_gcell_load, max_zone2_load)
+                load_range = zone2_load_range
 
             # Apply quantization constraints to find actual particle number
             if zone_type == 'glass':
                 gcell_load = find_nearest_glass_number(
-                    target_gcell_load, self.config['glass_files_dir'])
+                    target_gcell_load, self.config['glass_files_dir'],
+                    allowed_range=load_range)
             else:
-                gcell_load = find_next_cube(target_gcell_load)
+                gcell_load = find_nearest_cube(
+                    target_gcell_load, allowed_range=load_range)
+
+            # Explicitly check that the gcell load is as specified for Zone-I
+            if itype == 0:
+                if (np.abs(gcell_load - target_gcell_load) / target_gcell_load
+                    > 1e-6):
+                    raise Exception(
+                        f"Zone-I load not as anticipated "
+                        f"{gcell_load:.3e} vs. {target_gcell_load:.3e}."
+                    )
 
             # If we apply regular oversampling by splitting particles,
             # this increases the gcell load for type 0
@@ -1336,7 +1355,7 @@ class ParticleLoad:
             gcell_info['num_parts_per_cell'][itype] = gcell_load
 
             # Mass (fraction) of each particle in current gcell type
-            mass_itype = gcell_volume_fraction / gcell_load
+            mass_itype = self.gcube['gcell_volume'] / gcell_load
             gcell_info['particle_masses'][itype] = mass_itype
 
         # Some safety checks
@@ -1381,6 +1400,34 @@ class ParticleLoad:
         self._find_global_mass_distribution(gcell_info['particle_masses'])
 
         return gcell_info
+
+    def find_zone2_load_range(self, zone1_gcell_load):
+        """Work out the minimum and maximum allowed Zone-II particle loads."""
+        min_zone2_load = self.config['min_gcell_load']
+        if self.params['zone2_max_mpart_over_zone1'] is not None:
+            mass_ratio = self.params['zone2_max_mpart_over_zone1']
+            min_zone2_load = max(min_zone2_load, zone1_gcell_load / mass_ratio)
+        if self.params['zone2_max_mpart_msun'] is not None:
+            gcell_mass_msun = (
+                self.gcube['cell_volume'] * self.sim_box['mass_msun'])
+            min_zone2_load = max(
+                min_zone2_load,
+                gcell_mass_msun / self.params['zone2_max_mpart_msun']
+            )
+
+        # There is always a maximum: must be below the mass of Zone I.
+        max_zone2_load = (
+            zone1_gcell_load / self.params['zone2_min_mpart_over_zone1']
+        )
+
+        # Deal with stupid case of minimum being above maximum...
+        if min_zone2_load > max_zone2_load:
+            raise ValueError(
+                f"Invalid range for Zone II gcell loads: "
+                f"{min_zone2_load} > {max_zone2_load}!"
+            )
+
+        return [min_zone2_load, max_zone2_load]
 
     def _find_global_resolution_range(self, gcell_load_range):
         """
