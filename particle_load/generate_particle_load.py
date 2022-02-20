@@ -205,6 +205,7 @@ class ParticleLoad:
 
             # Zone separation options
             'gcube_n_buffer_cells': 2,
+            'gcube_min_size_mpc': 0.0,
 
             # Particle type options
             'zone1_gcell_load': 1331, 
@@ -744,8 +745,14 @@ class ParticleLoad:
             # In this case, we have fewer gcells (in general), but still
             # use the same size.
             mask_cube_size = self.mask_data['extent']
-            n_gcells = int(np.ceil(mask_cube_size / gcube['cell_size']))
-            gcube['n_cells'] = n_gcells + num_buffer_gcells * 2
+
+            buffer_size = gcube['cell_size'] * 2 * num_buffer_gcells
+            gcube_min_size = max(
+                mask_cube_size + buffer_size,
+                self.config['gcube_min_size_mpc'] / self.sim_box['l_mpc']
+            )
+            gcube['n_cells'] = int(
+                np.ceil(gcube_min_size / gcube['cell_size']))
 
             # Make sure that we don't assign more than the total number of
             # cells to the high-resolution region
