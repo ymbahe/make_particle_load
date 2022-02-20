@@ -252,6 +252,10 @@ class ParticleLoad:
             if cparams['dm_to_gas_number_ratio'] is None:
                 raise ValueError("Must specify the DM oversampling factor!")
 
+        if cparams['zone2_min_mpart_over_zone1'] < 1:
+            raise ValueError(
+                "Zone-II particles must be more massive than Zone-I!")
+
         # If an object directory is specified and has the specified mask file,
         # use that
         if (cparams['icgen_object_dir'] is not None and
@@ -1320,12 +1324,11 @@ class ParticleLoad:
             if itype == 0:
                 zone_type = zone1_type
                 target_gcell_load = zone1_gcell_load
+                load_range = [0, sys.maxsize]
             else:
                 zone_type = zone2_type
                 reduction_factor = zone2_mass_factor * itype
-                target_gcell_load = (
-                    max(min_zone2_load, zone1_gcell_load / reduction_factor))
-                target_gcell_load = min(target_gcell_load, max_zone2_load)
+                target_gcell_load = zone1_gcell_load / reduction_factor
                 load_range = zone2_load_range
 
             # Apply quantization constraints to find actual particle number
@@ -1355,7 +1358,7 @@ class ParticleLoad:
             gcell_info['num_parts_per_cell'][itype] = gcell_load
 
             # Mass (fraction) of each particle in current gcell type
-            mass_itype = self.gcube['gcell_volume'] / gcell_load
+            mass_itype = self.gcube['cell_volume'] / gcell_load
             gcell_info['particle_masses'][itype] = mass_itype
 
         # Some safety checks
@@ -1404,20 +1407,20 @@ class ParticleLoad:
     def find_zone2_load_range(self, zone1_gcell_load):
         """Work out the minimum and maximum allowed Zone-II particle loads."""
         min_zone2_load = self.config['min_gcell_load']
-        if self.params['zone2_max_mpart_over_zone1'] is not None:
-            mass_ratio = self.params['zone2_max_mpart_over_zone1']
+        if self.config['zone2_max_mpart_over_zone1'] is not None:
+            mass_ratio = self.config['zone2_max_mpart_over_zone1']
             min_zone2_load = max(min_zone2_load, zone1_gcell_load / mass_ratio)
-        if self.params['zone2_max_mpart_msun'] is not None:
+        if self.config['zone2_max_mpart_msun'] is not None:
             gcell_mass_msun = (
                 self.gcube['cell_volume'] * self.sim_box['mass_msun'])
             min_zone2_load = max(
                 min_zone2_load,
-                gcell_mass_msun / self.params['zone2_max_mpart_msun']
+                gcell_mass_msun / self.config['zone2_max_mpart_msun']
             )
 
         # There is always a maximum: must be below the mass of Zone I.
         max_zone2_load = (
-            zone1_gcell_load / self.params['zone2_min_mpart_over_zone1']
+            zone1_gcell_load / self.config['zone2_min_mpart_over_zone1']
         )
 
         # Deal with stupid case of minimum being above maximum...
