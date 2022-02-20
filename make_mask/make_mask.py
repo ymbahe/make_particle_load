@@ -13,7 +13,8 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpi4py import MPI
-
+from astropy.cosmology import FlatLambdaCDM
+import astropy.units as u
 
 from pdb import set_trace
 
@@ -158,6 +159,7 @@ class MakeMask:
             self.params['highres_padding_width'] = 0
             self.params['highres_diffusion_buffer'] = 50.0
             self.params['cell_padding_width'] = 0.0
+            self.params['mask_pad_in_mips'] = 3.0
             
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
@@ -255,6 +257,14 @@ class MakeMask:
                         pad_space = 1
                     self.params['padding_snaps'] = np.arange(
                         pad_start, pad_end+1, pad_space)
+            else:
+                self.params['padding_snaps'] = np.zeros(0, dtype=int)
+                    
+            # Check that we can compute a cell size
+            if self.params['cell_size_mpc'] == 'auto':
+                if 'cell_size_mips' not in self.params:
+                    raise AttributeError(
+                        "Must specify cell size to MIPS ratio for AUTO!")
                     
             # Convert coordinates and cuboid/slab dimensions to ndarray
             self.params['centre'] = np.array(self.params['centre'], dtype='f8')
@@ -445,7 +455,7 @@ class MakeMask:
         self.region = self.find_enclosing_frame()
 
         m_part = self.base_particle_mass()
-        self.mips = compute_mips(m_part, params['base_cosmology'])
+        self.mips = compute_mips(m_part, self.params['base_cosmology'])
         if self.params['cell_size_mpc'] == 'auto':
             self.params['cell_size_mpc'] = (
                 self.mips * self.params['cell_size_mips'])
@@ -458,8 +468,8 @@ class MakeMask:
 
         # If desired, identify additional padding particles in other snapshots.
         # This is currently only possible in non-MPI runs.
-        if (self.params['padding_snaps'] is not None and
-            not self.params['pad_full_cells']):
+        if (len(self.params['padding_snaps']) > 0
+            and not self.params['pad_full_cells']):
             inds_pad = self.find_extra_pad_particles(
                 ids, inds_target, inds_pad)
         
@@ -473,21 +483,28 @@ class MakeMask:
         # are relative to the centre of the box, which is found internally
         # (accounting for periodic wrapping); particle coordinates are also
         # shifted to this frame.
-        inds_all = np.concatenate((inds_target, inds_pax))
+        inds_all = np.concatenate((inds_target, inds_pad))
         box, origin = self.compute_bounding_box(inds_all)
         box[0, :] -= self.mips * self.params['mask_pad_in_mips']
         box[1, :] += self.mips * self.params['mask_pad_in_mips']
-        if (min(box) < self.params['box_size'] or
-            max(box) > self.params['box_size']):
-            raise ValueError("")
+        if (np.min(box) < -self.params['box_size'] / 2 or
+            np.max(box) > self.params['box_size'] / 2):
+            raise ValueError(
+                "Target and (preliminary) padding particles extend beyond "
+                "half a simulation box size from the centre: "
+                f"{np.min(box):.3f} / {np.max(box):.3f} vs. "
+                f"{(self.params['box_size'] / 2):.3f} Mpc."
+            )
 
         # Build the basic masks. These are 3D Boolean arrays covering the
         # bounding box computed above.
         # Cells containing at least the specified threshold number of
         # (target / target + pad) particles are True, others are False.
-        self.target_mask = Mask(self.lagrangian_coords[inds_target], box)
-        self.full_mask = Mask(self.lagrangian_coords[inds_all], box)
-        self.cell_size = self.target_mask.cell_size
+        self.cell_size = self.params['cell_size_mpc']
+        self.target_mask = Mask(
+            self.lagrangian_coords[inds_target], box, self.params)
+        self.full_mask = Mask(
+            self.lagrangian_coords[inds_all], box, self.params)
 
         # Record the origin (centre) of the mask in the full simulation box
         self.target_mask.set_origin(origin)
@@ -521,10 +538,12 @@ class MakeMask:
 
         # Re-center the full mask to account for possible shifts
         # (this does not involve any particles)
+        self.target_mask.compute_active_box()
         self.full_mask.compute_active_box()
         self.full_mask.recenter()
 
         # Compute the centres of active cells (key output)
+        self.target_mask.get_active_cell_centres()
         self.full_mask.get_active_cell_centres()
 
     # ------------------------------------------------------------------------
@@ -576,7 +595,7 @@ class MakeMask:
     def base_particle_mass(self):
         """Load the particle mass of the base simulation."""
         if comm_rank == 0:
-            with h5.File(self.params['snapshot_file'], 'r') as f:
+            with h5py.File(self.params['snapshot_file'], 'r') as f:
                 m_part = f['PartType1/Masses'][0] * 1e10
             print(f'Base simulation particle mass: {m_part:.3e} M_Sun.')
         else:
@@ -850,6 +869,7 @@ class MakeMask:
         # particles are all within the same image of the box. For consistency
         # and simplicity, shift all coordinates to the box centre:
         origin += ((box[0, :] + box[1, :]) / 2)
+        box -= origin
         self.lagrangian_coords -= origin
 
         # Although all *selected* particles are guaranteed to be in the same
@@ -968,7 +988,7 @@ class MakeMask:
         for snap in snaps:
             snapshot_base = self.params['snapshot_base']
             snapshot_file = snapshot_base.replace('$isnap', f'{snap:04d}')
-            with h5.File(snapshot_file, 'r') as f:
+            with h5py.File(snapshot_file, 'r') as f:
                 snap_ids = f['PartType1/ParticleIDs'][...]
                 snap_pos = f['PartType1/Coordinates'][...]
 
@@ -1005,7 +1025,10 @@ class MakeMask:
         to access (a subset of) the particles stored on them.
 
         """
+        if comm_rank == 0:
+            print("Plotting Lagrangian region...")
         axis_labels = ['x', 'y', 'z']
+        mask = self.full_mask
 
         # Select a random sub-sample of particle coordinates on each rank and
         # combine them all on rank 0
@@ -1021,7 +1044,7 @@ class MakeMask:
         plot_coords = np.vstack(plot_coords)
 
         # Extract frequently needed attributes for easier structure
-        bound = self.mask_extent
+        bound = mask.mask_extent
         cell_size = self.cell_size
 
         fig, axarr = plt.subplots(1, 3, figsize=(13, 4))
@@ -1039,7 +1062,7 @@ class MakeMask:
             ax.add_patch(rect)
 
             # Draw on outline of cuboidal bounding region
-            box_corners = [self.mask_box[:, xx], self.mask_box[:, yy]]
+            box_corners = [mask.mask_box[:, xx], mask.mask_box[:, yy]]
             ax.plot(
                 box_corners[0][[0, 1, 1, 0, 0]],
                 box_corners[1][[0, 0, 1, 1, 0]],
@@ -1056,13 +1079,13 @@ class MakeMask:
 
             # Plot (the centres of) selected mask cells.
             ax.scatter(
-                self.cell_coords[:, xx], self.cell_coords[:, yy],
+                mask.cell_coords[:, xx], mask.cell_coords[:, yy],
                 marker='x', color='red', s=5, alpha=0.2)
 
             # Plot cell outlines if there are not too many of them.
-            if self.cell_coords.shape[0] < 10000:
+            if mask.cell_coords.shape[0] < 10000:
                 for e_x, e_y in zip(
-                    self.cell_coords[:, xx], self.cell_coords[:, yy]):
+                    mask.cell_coords[:, xx], mask.cell_coords[:, yy]):
                     rect = patches.Rectangle(
                         (e_x - cell_size/2, e_y - cell_size/2),
                         cell_size, cell_size,
@@ -1097,6 +1120,7 @@ class MakeMask:
             self.params['output_dir'], self.params['fname']) + ".png"
         plt.savefig(plotloc, dpi=200)
         plt.close()
+        print("...done!")
 
     def plot_halo(self, pos):
         """
@@ -1229,7 +1253,7 @@ class MakeMask:
 
             # Main output is the centres of selected mask cells
             self.full_mask.write(f)
-            self.target_mask.write(f, subgroup=TargetMask)
+            self.target_mask.write(f, subgroup="TargetMask")
 
         print(f"Saved mask data to file `{outloc}`.")
 
@@ -1237,12 +1261,15 @@ class MakeMask:
 class Mask:
     """Low-level class to represent one individual mask."""
 
-    def __init__(self, r, box):
+    def __init__(self, r, box, params):
 
+        self.params = params
+        self.box = box
+        
         # Work out how many cells we need along each dimension so that the
         # cells remain below the specified threshold size
         box_widths = box[1, :] - box[0, :]
-        self.cell_size = self.params['cell_size_mpc']
+        self.cell_size = params['cell_size_mpc']
         num_cells = np.ceil(box_widths / self.cell_size).astype(int)
 
         # To keep the cells cubic at the specified side length, we need to
@@ -1251,14 +1278,14 @@ class Mask:
         for idim in range(3):
             extent_dim = num_cells[idim] / 2 * self.cell_size
             bin_edges.append(
-                np.linspace(-extent_dim, extent_dim, num=num_cells+1))
+                np.linspace(-extent_dim, extent_dim, num=num_cells[idim]+1))
 
         # Compute the number of particles in each cell, across MPI ranks
         n_p, edges = np.histogramdd(r, bins=bin_edges)
         n_p = comm.allreduce(n_p, op=MPI.SUM)
 
         # Convert particle counts to True/False mask
-        self.mask = (n_p >= self.params['min_num_per_cell'])
+        self.mask = (n_p >= params['min_num_per_cell'])
         self.edges = edges
         self.shape = np.array(self.mask.shape)
 
@@ -1320,35 +1347,47 @@ class Mask:
         be performed: (i) cells within a given distance from a target
 
         """
-
-        cell_indices = coordinate_to_cell(r, self.cell_size, self.shape)
-
+        if len(r) > 0:
+            cell_indices = self.coordinates_to_cell(r)
+            extra_low = np.abs(np.min(cell_indices, axis=0))
+            extra_high = np.max(cell_indices, axis=0) - self.shape
+        else:
+            extra_low = np.zeros(3, dtype=int)
+            extra_high = np.zeros(3, dtype=int)
+            
         if cell_padding_width > 0:
             if target_mask is None:
                 raise ValueError("Must provide target mask!")
             cell_pad_extra = (
                 int(np.ceil(cell_padding_width / self.cell_size)) * 2)
+        else:
+            cell_pad_extra = np.zeros(3, dtype=int)
 
         if refinement_allowance is not None:
             ref_extra = np.ceil(target_mask.shape * refinement_allowance[0])
             ref_extra_min = refinement_allowance[1]
             ref_extra = np.maximum(ref_extra, ref_extra_min).astype(int)
-
+        else:
+            ref_extra = np.zeros(3, dtype=int)
+            
         uniform_extra = np.maximum(cell_pad_extra, ref_extra)
-
-        extra_low = np.abs(np.min(cell_indices, axis=0))
         extra_low = np.maximum(extra_low, uniform_extra)
-        extra_high = np.max(cell_indices, axis=0) - self.shape
         extra_high = np.maximum(extra_high, uniform_extra)
-
         new_shape = self.shape + extra_low + extra_high
 
         new_edges = []
         for idim in range(3):
-            new_min = self.edges[idim][0] - self.cell_size * extra_low
-            new_max = self.edges[idim][-1] + self.cell_size * extra_high
-            new_edges.append(np.arange(new_min, new_max, self.cell_size))
-
+            new_min = self.edges[idim][0] - self.cell_size * extra_low[idim]
+            new_max = self.edges[idim][-1] + self.cell_size * extra_high[idim]
+            new_edges.append(
+                np.linspace(new_min, new_max, num=new_shape[idim] + 1))
+            new_cell_size = new_edges[idim][1] - new_edges[idim][0]
+            if np.abs(new_cell_size - self.cell_size) / self.cell_size > 1e-6:
+                raise ValueError(
+                    f"Cell size changed during expansion "
+                    f"({new_cell_size:.3f} vs. {self.cell_size:.3f} Mpc.)"
+                )
+            
         # Compute number of particles in each cell, across MPI ranks
         n_p, edges = np.histogramdd(r, bins=new_edges)
         n_p = comm.allreduce(n_p, op=MPI.SUM)
@@ -1357,9 +1396,10 @@ class Mask:
         new_mask = n_p >= self.params['min_num_per_cell']
 
         # Add in old mask
-        new_mask[extra_low[0]:-extra_high[0],
-                 extra_low[1]:-extra_high[1],
-                 extra_low[2]:-extra_high[2]] += self.mask
+        new_mask[extra_low[0]:self.shape[0]-extra_high[0],
+                 extra_low[1]:self.shape[1]-extra_high[1],
+                 extra_low[2]:self.shape[2]-extra_high[2]
+        ] += self.mask
 
         # Don't need the old mask/edges anymore, replace with updated ones
         self.mask = new_mask
@@ -1463,10 +1503,10 @@ class Mask:
         ind_sel = np.where(self.mask)   # 3-tuple of ndarrays!
         self.mask_box = np.zeros((2, 3))
         for idim in range(3):
-            min_index = np.min(ind_sel[idim])
-            max_index = np.max(ind_sel[idim])
-            self.mask_box[0, idim] = self.edges[min_index]
-            self.mask_box[1, idim] = self.edges[max_index + 1]
+            edges = self.edges[idim]
+            ind_dim = ind_sel[idim]
+            self.mask_box[0, idim] = np.min(edges[ind_dim])
+            self.mask_box[1, idim] = np.max(edges[ind_dim + 1])
 
         self.mask_widths = self.mask_box[1, :] - self.mask_box[0, :]
         self.mask_extent = np.max(self.mask_widths)
@@ -1514,9 +1554,9 @@ class Mask:
         """Find the centre of all selected mask cells"""
         ind_sel = np.where(self.mask)   # Note: 3-tuple of ndarrays!
         self.cell_coords = np.vstack(
-            (self.edges[ind_sel[0]],
-             self.edges[ind_sel[1]],
-             self.edges[ind_sel[2]]
+            (self.edges[0][ind_sel[0]],
+             self.edges[1][ind_sel[1]],
+             self.edges[2][ind_sel[2]]
             )
         ).T
         self.cell_coords += self.cell_size * 0.5
@@ -1547,7 +1587,7 @@ class Mask:
         # Store attributes directly related to the mask as HDF5 attributes.
         ds.attrs.create('mask_corners', self.mask_box)
         ds.attrs.create('bounding_length', self.mask_extent)
-        ds.attrs.create('geo_centre', self.mask_centre)
+        ds.attrs.create('geo_centre', self.origin)
         ds.attrs.create('grid_cell_width', self.cell_size)
 
         # Also store full regular mask structure
@@ -1562,7 +1602,7 @@ class Mask:
         ds.attrs.create('z_edges', self.edges[2])
         ds.attrs.create('mask_corners', self.mask_box)
         ds.attrs.create('bounding_length', self.mask_extent)
-        ds.attrs.create('geo_centre', self.mask_centre)
+        ds.attrs.create('geo_centre', self.origin)
         ds.attrs.create('grid_cell_width', self.cell_size)
 
 
