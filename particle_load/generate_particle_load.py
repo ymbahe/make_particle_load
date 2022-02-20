@@ -210,7 +210,7 @@ class ParticleLoad:
             'zone1_gcell_load': 1331, 
             'zone1_type': "glass",
             'zone2_type': "glass",
-            'zone2_mass_factor': 8.0,
+            'zone2_mass_factor_per_mpc': 1.0,
             'zone3_ncell_factor': 0.5,
             'zone3_min_n_cells': 20,
             'zone3_max_n_cells': 1000,
@@ -1285,7 +1285,8 @@ class ParticleLoad:
         zone1_gcell_load = self.config['zone1_gcell_load']
         zone1_type = self.config['zone1_type']
         zone2_type = self.config['zone2_type']
-        zone2_mass_drop_factor = self.config['zone2_mass_factor']
+        zone2_mass_factor = (self.config['zone2_mass_factor_per_mpc'] *
+                             self.gcube['cell_size_mpc'])
         min_gcell_load = self.config['min_gcell_load']
 
         # Number of high resolution particles this rank will have.
@@ -1315,7 +1316,7 @@ class ParticleLoad:
                 target_gcell_load = zone1_gcell_load
             else:
                 zone_type = zone2_type
-                reduction_factor = zone2_mass_drop_factor * itype
+                reduction_factor = zone2_mass_factor * itype
                 target_gcell_load = int(np.ceil(
                     max(min_gcell_load, zone1_gcell_load / reduction_factor)))
 
