@@ -519,12 +519,11 @@ class MakeMask:
             self.full_mask.refine(idim, self.params)
 
         # Re-center the full mask to account for possible shifts
+        # (this does not involve any particles)
         self.full_mask.compute_box()
+
         mask_offset = self.full_mask.recenter()
-        self.lagrangian_coords -= mask_offset
-
         self.full_mask.get_active_cell_centres()
-
 
     def find_enclosing_frame(self):
         """
@@ -1356,6 +1355,10 @@ class Mask:
                  extra_low[1]:-extra_high[1],
                  extra_low[2]:-extra_high[2]] += self.mask
 
+        # Don't need the old mask/edges anymore, replace with updated ones
+        self.mask = new_mask
+        self.edges = new_edges
+
         # If desired, activate padding cells
         if cell_padding_width > 0:
             all_cell_centres = self.get_cell_centres()
@@ -1474,17 +1477,24 @@ class Mask:
             f"Bounding length: {self.mask_extent:.4f} Mpc")
 
     def recenter(self):
-        """Re-center the mask such that the selection is centred on origin."""
+        """
+        Re-center the mask such that the selection is centred on origin.
+
+        This affects the internal coordinates of cells, but not their 'actual'
+        position in the simulation frame. The shift is based on the current
+        value of the "self.mask_box" array.
+
+        """
         mask_offset = (self.mask_box[1, :] + self.mask_box[0, :]) / 2
         self.mask_box[0, :] -= mask_offset
         self.mask_box[1, :] -= mask_offset
-        self.mask_centre += mask_offset
+        self.origin += mask_offset
         for idim in range(3):
-            self.edges[idim] -= mask_offset
+            self.edges[idim] -= mask_offset[idim]
 
-        print(f"Re-centred mask by {mask_offset} Mpc.") 
+        print(f"Re-centred mask by {mask_offset[0]:.3f} / "
+              f"{mask_offset[1]:.3f} / {mask_offset[2]:.3f} Mpc.")
         return mask_offset
-
 
     def get_active_cell_centres(self):
         """Find the centre of all selected mask cells"""
