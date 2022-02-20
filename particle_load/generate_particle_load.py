@@ -2871,11 +2871,34 @@ def make_uniform_grid(n=None, num=None, centre=False):
     return coords
 
 
-def find_nearest_glass_number(num, glass_files_dir):
+def find_nearest_glass_number(
+    num, glass_files_dir, allowed_range=[1, sys.maxsize]):
     """Find the closest number of glass particles in a file to `num`.""" 
     files = os.listdir(glass_files_dir)
     num_in_files = [int(_f.split('_')[2]) for _f in files if 'ascii' in _f]
     num_in_files = np.array(num_in_files, dtype='i8')
+
+    # Check to make sure that we don't have unrealistic expectations
+    if np.max(num_in_files) < allowed_range[0]:
+        raise ValueError(
+            f"There are no glass files above the minimum allowed load of "
+            f"{allowed_range[0]} (highest: {np.max(num_in_files)})!"
+        )
+    if np.min(num_in_files) > allowed_range[1]:
+        raise ValueError(
+            f"There are no glass files below the maximum allowed load of "
+            f"{allowed_range[1]} (lowest: {np.min(num_in_files)})!"
+        )
+
+    # We limit the list of available files to those in the correct load range
+    ind_allowed_files = np.nonzero(
+        (num_in_files >= allowed_range[0]) & (num_in_files <= allowed_range[1])
+    )[0]
+    if len(ind_allowed_files) == 0:
+        raise Exception(
+            "Something is wrong - could not find any allowed glass files.")
+    num_in_files = num_in_files[ind_allowed_files]
+
     index_best = np.abs(num_in_files - num).argmin()
     return num_in_files[index_best]
 
@@ -3044,14 +3067,34 @@ def find_previous_cube(num, min_root=1):
     """Find the highest number <=num that has a cube root."""
     return int(max(np.floor(np.cbrt(num)), min_root)**3)
 
-def find_nearest_cube(num, min_root=1):
-    """Find the cube number closest to num."""
-    root_low = int(max(np.floor(np.cbrt(num)), min_root))
+def find_nearest_cube(num, allowed_range=[1, sys.maxsize]):
+    """
+    Find the cube number closest to num.
+
+    Parameters
+    ----------
+    allowed_range : [int, int], optional
+        The return value must lie in this range.
+
+    Returns
+    -------
+    cube : int
+        The nearest cube integer to num.
+
+    """
+    allowed_range = [find_next_cube(allowed_range[0]),
+                     find_previous_cube(allowed_range[1])
+    ]
+    root_range = np.rint(np.cbrt(allowed_range)).astype(int)
+
+    root = np.clip(np.cbrt(num), root_range[0], root_range[1])
+    root_low = int(np.floor(root))
+    root_high = int(np.ceil(root))
+
     cube_low = root_low**3
-    cube_high = (root_low + 1)**3
-    diff_low = np.abs(cube_low - num)
-    diff_high = np.abs(cube_high - num)
-    if diff_low < diff_high:
+    cube_high = root_high**3
+
+    if np.abs(cube_low - num) < np.abs(cube_high - num):
         return cube_low
     else:
         return cube_high
