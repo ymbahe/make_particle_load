@@ -32,6 +32,7 @@ sys.path.append(
 )
 import crossref as xr
 import cosmology as co
+from timestamp import TimeStamp
 
 # Load utilities, with safety checks to make sure that they are accessible
 try:
@@ -520,8 +521,11 @@ class MakeMask:
                 self.lagrangian_coords)
             inds_pad = self.find_extra_pad_particles(
                 ids, full_target_inds, inds_pad, with_primary_snapshot=True)
+            self.inds_target_xt = full_target_inds
+        else:
+            self.inds_target_xt = self.inds_target
         self.inds_pad = inds_pad
-                
+        
         # Expand the full mask with updated padding particles. If applicable,
         # also add entire high-res padding cells around those hosting target
         # particles. The mask is enlarged appropriately to allow refinement.
@@ -990,8 +994,11 @@ class MakeMask:
         snaps = self.params['padding_snaps']
         if with_primary_snapshot:
             snaps = np.concatenate(([self.params['primary_snapshot']], snaps))
-
+        print("About to search for extra padding particles in snapshots ",
+              snaps)
+            
         for snap in snaps:
+            print(f"   ... snapshot {snap}...")
             snapshot_base = self.params['snapshot_base']
             snapshot_file = snapshot_base.replace('$isnap', f'{snap:04d}')
             with h5py.File(snapshot_file, 'r') as f:
@@ -1006,21 +1013,43 @@ class MakeMask:
                 )
             r = snap_pos[inds, :]
             r_target = r[inds_target, :]
+            print(f"    ... loaded and matched IDs...")
 
-            target_tree = cKDTree(r_target, boxsize=self.params['box_size'])
-            ngb_tree = cKDTree(r, boxsize=self.params['box_size'])
-
-            ngbs_lol = ngb_tree.query_ball_tree(
-                target_tree, r=self.params['highres_padding_width'])
             is_tagged = np.zeros(len(inds), dtype=bool)
-            for ii in len(inds):
-                is_tagged[ngbs_lol[ii]] = True
+            bounds = np.arange(0, len(inds_target), 1000)
 
+            ts = TimeStamp()
+            
+            nbatch = len(bounds) - 1
+            for ibatch in range(nbatch):
+                tss = TimeStamp()
+                print(f"Batch {ibatch+1} / {nbatch}...")
+                if (ibatch < nbatch / 20 or
+                    ibatch in np.linspace(0, nbatch, num=25, dtype=int)):
+                    print(f"   ... build new tree ...")
+                    ind_ngb = np.nonzero(is_tagged == 0)[0]
+                    ngb_tree = cKDTree(r[ind_ngb, :],
+                                       boxsize=self.params['box_size'])
+                    tss.set_time('ngb tree')
+
+                target_tree = cKDTree(
+                    r_target[bounds[ibatch] : bounds[ibatch+1], :],
+                    boxsize=self.params['box_size'])
+                tss.set_time('target tree')
+                ngbs_lol = target_tree.query_ball_tree(
+                    ngb_tree, r=self.params['highres_padding_width'])
+                tss.set_time('query')
+                for ngbs in ngbs_lol:
+                    is_tagged[ind_ngb[ngbs]] = True
+                tss.set_time('transcribe')
+                ts.import_times(tss)
+
+            ts.set_time('Batches')
+            ts.print_time_usage('Finished ngb search', mode='sub')
             inds_tagged = np.nonzero(is_tagged)[0]
             inds_pad = np.unique(np.concatenate((inds_pad, inds_tagged)))
 
         return inds_pad
-
 
     def plot(self, max_npart_per_rank=int(1e5)):
         """
@@ -1037,7 +1066,7 @@ class MakeMask:
         mask = self.full_mask
         target_mask = self.target_mask
         
-        plot_inds = self.inds_target
+        plot_inds = self.inds_target_xt
         pad_inds = self.inds_pad
         
         # Select a random sub-sample of particle coordinates on each rank and
@@ -1308,7 +1337,6 @@ class Mask:
     def __init__(self, r, box, params):
 
         self.params = params
-        self.box = box
         
         # Work out how many cells we need along each dimension so that the
         # cells remain below the specified threshold size
@@ -1332,6 +1360,11 @@ class Mask:
         self.mask = (n_p >= params['min_num_per_cell'])
         self.edges = edges
         self.shape = np.array(self.mask.shape)
+
+        self.box = np.zeros((2, 3))
+        for idim in range(3):
+            self.box[0, idim] = self.edges[idim][0]
+            self.box[1, idim] = self.edges[idim][-1]
 
     def set_origin(self, origin):
         self.origin = np.copy(origin)
@@ -1391,32 +1424,35 @@ class Mask:
         be performed: (i) cells within a given distance from a target
 
         """
+        # Determine (integer) number of cells below and above current mask
+        # to accommodate extra padding particles
         if len(r) > 0:
             cell_indices = self.coordinates_to_cell(r)
             extra_low = np.abs(np.min(cell_indices, axis=0))
-            extra_high = np.max(cell_indices, axis=0) - self.shape
+            extra_high = np.max(cell_indices, axis=0) - self.shape + 1
         else:
             extra_low = np.zeros(3, dtype=int)
             extra_high = np.zeros(3, dtype=int)
-            
+
+        # (Symmetric) extra number of cells for cell-level padding
         if cell_padding_width > 0:
             if target_mask is None:
                 raise ValueError("Must provide target mask!")
-            cell_pad_extra = (
-                int(np.ceil(cell_padding_width / self.cell_size)) * 2)
+            cell_pad_extra = int(np.ceil(
+                cell_padding_width / self.cell_size + np.sqrt(3) - 1))
         else:
             cell_pad_extra = np.zeros(3, dtype=int)
 
+        # (Symmetric) extra number of cells for later refinement
         if refinement_allowance is not None:
             ref_extra = np.ceil(target_mask.shape * refinement_allowance[0])
             ref_extra_min = refinement_allowance[1]
             ref_extra = np.maximum(ref_extra, ref_extra_min).astype(int)
         else:
             ref_extra = np.zeros(3, dtype=int)
-            
-        uniform_extra = np.maximum(cell_pad_extra, ref_extra)
-        extra_low = np.maximum(extra_low, uniform_extra)
-        extra_high = np.maximum(extra_high, uniform_extra)
+
+        extra_low = np.maximum(extra_low, cell_pad_extra) + ref_extra
+        extra_high = np.maximum(extra_high, cell_pad_extra) + ref_extra
         new_shape = self.shape + extra_low + extra_high
 
         new_edges = []
