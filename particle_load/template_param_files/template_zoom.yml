@@ -18,12 +18,17 @@ dm_to_gas_mass_ratio:         1.0       # [Semi-optional] If gas is to be identi
 icgen_object_dir:      /path/to/base/dir/suite/ICs/object   # [Semi-optional] IC_Gen base directory for all ICs of this object. If it is not specified, icgen_work_dir must be.
 
 # PARTICLE LOAD DETAILS #
-zone1_type:                 glass         # Pattern type to use for highest-resolution gcells: `glass' (default) or `grid'.
-zone2_type:                 glass         # Pattern type to use for Zone-II gcells: `glass' (default) or `grid'.
+zone1_type:                  glass    # Pattern type to use for highest-resolution gcells: `glass' (default) or `grid'.
+zone2_type:                  glass    # Pattern type to use for Zone-II gcells: `glass' (default) or `grid'.
+zone2_mpart_factor_per_mpc:  1.0      # Desired mass increase in Zone-II gcells per Mpc distance from Zone I (default: 1.0).
+zone2_min_mpart_over_zone1:  1.5      # Minimum particle mass in Zone II vs. Zone I (default: 1.5). Must be >= 1.0.
+zone2_max_mpart_over_zone1:  None     # Maximum particle mass in Zone II vs. Zone I (default: None, no limit).
+zone2_max_mpart_msun:        None     # Maximum particle mass in Zone II in M_Sun (default: None, no limit).
 
 # ZOOM-SPECIFIC OPTIONS #
 is_zoom:               True             # [REQUIRED] Is this a zoom simulation?
 mask_file:             mask_file.hdf5   # [REQUIRED] The mask file to use for the particle load (only significant if is_zoom is True). If icgen_object_dir is specified and mask_file exists in it, this is used. Otherwise, it must be an absolute path or relative to the current working directory.
+gcube_min_size_mpc:    0.0              # Minimum size of the gcube in Mpc (default: 0).
 
 # HIGH-LEVEL OPTIONS FOR SETTING UP SUBSEQUENT CODES #
 generate_param_files:   True           # Auto-generate parameter files (default: True)?

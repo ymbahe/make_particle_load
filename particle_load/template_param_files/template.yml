@@ -24,19 +24,23 @@ max_numpart_per_file:  64000000       # Maximum number of particles to write to 
 glass_files_dir:       ./glass_files  # Directory in which the glass files are stored (default: ./glass_files). Only needed if zone1_type or zone2_type is glass.
 
 # PARTICLE LOAD DETAILS #
-zone1_gcell_load:           1331          # Desired number of particles per highest-resolution gcell. Default: 11^3 = 1331
-zone1_type:                 glass         # Pattern type to use for highest-resolution gcells: `glass' (default) or `grid'.
-zone2_type:                 glass         # Pattern type to use for Zone-II gcells: `glass' (default) or `grid'.
-zone2_mass_factor:          8.0           # Desired mass increase between Zone-II layers (default: 8.0).
-min_gcell_load:             8             # Minimum number of particles per gcell (default: 8).
-zone3_ncell_factor:         0.5           # Decrease in cell size at the Zone-II/III boundary (default: 0.5).
-zone3_min_n_cells:          20            # Minimum required number of particles per dimension for Zone-III layers (default: 20).
-zone3_max_n_cells:          1000          # Maximum allowed number of particles per dimension for Zone-III layers (default: 1000).
+zone1_gcell_load:            1331     # Desired number of particles per highest-resolution gcell. Default: 11^3 = 1331
+zone1_type:                  glass    # Pattern type to use for highest-resolution gcells: `glass' (default) or `grid'.
+zone2_type:                  glass    # Pattern type to use for Zone-II gcells: `glass' (default) or `grid'.
+zone2_mpart_factor_per_mpc:  1.0      # Desired mass increase in Zone-II gcells per Mpc distance from Zone I (default: 1.0).
+zone2_min_mpart_over_zone1:  1.5      # Minimum particle mass in Zone II vs. Zone I (default: 1.5). Must be >= 1.0.
+zone2_max_mpart_over_zone1:  None     # Maximum particle mass in Zone II vs. Zone I (default: None, no limit).
+zone2_max_mpart_msun:        None     # Maximum particle mass in Zone II in M_Sun (default: None, no limit).
+min_gcell_load:              8        # Minimum number of particles per gcell (default: 8).
+zone3_ncell_factor:          0.5      # Decrease in cell size at the Zone-II/III boundary (default: 0.5).
+zone3_min_n_cells:           20       # Minimum required number of particles per dimension for Zone-III layers (default: 20).
+zone3_max_n_cells:           1000     # Maximum allowed number of particles per dimension for Zone-III layers (default: 1000).
 
 # ZOOM-SPECIFIC OPTIONS #
 is_zoom:             False            # [REQUIRED] Is this a zoom simulation?
 mask_file:           mask_file.hdf5   # [REQUIRED] The mask file to use for the particle load (only significant if is_zoom is True). If icgen_object_dir is specified and mask_file exists in it, this is used. Otherwise, it must be an absolute path or relative to the current working directory.
 gcube_n_buffer_cells:       2         # Number of gcells per dimension to add beyond the volume specified by the mask (default: 2). 
+gcube_min_size_mpc:         0.0       # Minimum size of the gcube in Mpc (default: 0).
 
 # HIGH-LEVEL OPTIONS FOR SETTING UP SUBSEQUENT CODES #
 generate_param_files:   True           # Auto-generate parameter files (default: True)?

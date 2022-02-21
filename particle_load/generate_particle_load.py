@@ -205,12 +205,16 @@ class ParticleLoad:
 
             # Zone separation options
             'gcube_n_buffer_cells': 2,
+            'gcube_min_size_mpc': 0.0,
 
             # Particle type options
             'zone1_gcell_load': 1331, 
             'zone1_type': "glass",
             'zone2_type': "glass",
-            'zone2_mass_factor': 8.0,
+            'zone2_mpart_factor_per_mpc': 1.0,
+            'zone2_min_mpart_over_zone1': 1.5,
+            'zone2_max_mpart_over_zone1': None,
+            'zone2_max_mpart_msun': None,
             'zone3_ncell_factor': 0.5,
             'zone3_min_n_cells': 20,
             'zone3_max_n_cells': 1000,
@@ -248,6 +252,10 @@ class ParticleLoad:
         if cparams['generate_extra_dm_particles']:
             if cparams['dm_to_gas_number_ratio'] is None:
                 raise ValueError("Must specify the DM oversampling factor!")
+
+        if cparams['zone2_min_mpart_over_zone1'] < 1:
+            raise ValueError(
+                "Zone-II particles must be more massive than Zone-I!")
 
         # If an object directory is specified and has the specified mask file,
         # use that
@@ -731,13 +739,20 @@ class ParticleLoad:
         # Side length of one gcell
         gcube['cell_size_mpc'] = self.sim_box['l_mpc'] / n_base
         gcube['cell_size'] = 1. / n_base   # In sim box size units
+        gcube['cell_volume'] = gcube['cell_size']**3
 
         if self.config['is_zoom']:
             # In this case, we have fewer gcells (in general), but still
             # use the same size.
             mask_cube_size = self.mask_data['extent']
-            n_gcells = int(np.ceil(mask_cube_size / gcube['cell_size']))
-            gcube['n_cells'] = n_gcells + num_buffer_gcells * 2
+
+            buffer_size = gcube['cell_size'] * 2 * num_buffer_gcells
+            gcube_min_size = max(
+                mask_cube_size + buffer_size,
+                self.config['gcube_min_size_mpc'] / self.sim_box['l_mpc']
+            )
+            gcube['n_cells'] = int(
+                np.ceil(gcube_min_size / gcube['cell_size']))
 
             # Make sure that we don't assign more than the total number of
             # cells to the high-resolution region
@@ -1285,8 +1300,8 @@ class ParticleLoad:
         zone1_gcell_load = self.config['zone1_gcell_load']
         zone1_type = self.config['zone1_type']
         zone2_type = self.config['zone2_type']
-        zone2_mass_drop_factor = self.config['zone2_mass_factor']
-        min_gcell_load = self.config['min_gcell_load']
+        zone2_mass_factor = (self.config['zone2_mpart_factor_per_mpc'] *
+                             self.gcube['cell_size_mpc'])
 
         # Number of high resolution particles this rank will have.
         gcell_info = {
@@ -1297,7 +1312,10 @@ class ParticleLoad:
             'num_types': num_gcell_types
         }
 
-        gcell_volume_fraction = self.gcube['cell_size']**3
+        # Find allowed range of loads for Zone-II gcells
+        # (do this now already, because zone1_gcell_load is assumed to be
+        # correct, i.e. the exact value that will actually be used).
+        zone2_load_range = self.find_zone2_load_range(zone1_gcell_load)
 
         # Analyse each gcell type in turn
         for itype in range(num_gcell_types):
@@ -1313,18 +1331,30 @@ class ParticleLoad:
             if itype == 0:
                 zone_type = zone1_type
                 target_gcell_load = zone1_gcell_load
+                load_range = [0, sys.maxsize]
             else:
                 zone_type = zone2_type
-                reduction_factor = zone2_mass_drop_factor * itype
-                target_gcell_load = int(np.ceil(
-                    max(min_gcell_load, zone1_gcell_load / reduction_factor)))
+                reduction_factor = zone2_mass_factor * itype
+                target_gcell_load = zone1_gcell_load / reduction_factor
+                load_range = zone2_load_range
 
             # Apply quantization constraints to find actual particle number
             if zone_type == 'glass':
                 gcell_load = find_nearest_glass_number(
-                    target_gcell_load, self.config['glass_files_dir'])
+                    target_gcell_load, self.config['glass_files_dir'],
+                    allowed_range=load_range)
             else:
-                gcell_load = find_next_cube(target_gcell_load)
+                gcell_load = find_nearest_cube(
+                    target_gcell_load, allowed_range=load_range)
+
+            # Explicitly check that the gcell load is as specified for Zone-I
+            if itype == 0:
+                if (np.abs(gcell_load - target_gcell_load) / target_gcell_load
+                    > 1e-6):
+                    raise Exception(
+                        f"Zone-I load not as anticipated "
+                        f"{gcell_load:.3e} vs. {target_gcell_load:.3e}."
+                    )
 
             # If we apply regular oversampling by splitting particles,
             # this increases the gcell load for type 0
@@ -1335,7 +1365,7 @@ class ParticleLoad:
             gcell_info['num_parts_per_cell'][itype] = gcell_load
 
             # Mass (fraction) of each particle in current gcell type
-            mass_itype = gcell_volume_fraction / gcell_load
+            mass_itype = self.gcube['cell_volume'] / gcell_load
             gcell_info['particle_masses'][itype] = mass_itype
 
         # Some safety checks
@@ -1380,6 +1410,34 @@ class ParticleLoad:
         self._find_global_mass_distribution(gcell_info['particle_masses'])
 
         return gcell_info
+
+    def find_zone2_load_range(self, zone1_gcell_load):
+        """Work out the minimum and maximum allowed Zone-II particle loads."""
+        min_zone2_load = self.config['min_gcell_load']
+        if self.config['zone2_max_mpart_over_zone1'] is not None:
+            mass_ratio = self.config['zone2_max_mpart_over_zone1']
+            min_zone2_load = max(min_zone2_load, zone1_gcell_load / mass_ratio)
+        if self.config['zone2_max_mpart_msun'] is not None:
+            gcell_mass_msun = (
+                self.gcube['cell_volume'] * self.sim_box['mass_msun'])
+            min_zone2_load = max(
+                min_zone2_load,
+                gcell_mass_msun / self.config['zone2_max_mpart_msun']
+            )
+
+        # There is always a maximum: must be below the mass of Zone I.
+        max_zone2_load = (
+            zone1_gcell_load / self.config['zone2_min_mpart_over_zone1']
+        )
+
+        # Deal with stupid case of minimum being above maximum...
+        if min_zone2_load > max_zone2_load:
+            raise ValueError(
+                f"Invalid range for Zone II gcell loads: "
+                f"{min_zone2_load} > {max_zone2_load}!"
+            )
+
+        return [min_zone2_load, max_zone2_load]
 
     def _find_global_resolution_range(self, gcell_load_range):
         """
@@ -2823,11 +2881,34 @@ def make_uniform_grid(n=None, num=None, centre=False):
     return coords
 
 
-def find_nearest_glass_number(num, glass_files_dir):
+def find_nearest_glass_number(
+    num, glass_files_dir, allowed_range=[1, sys.maxsize]):
     """Find the closest number of glass particles in a file to `num`.""" 
     files = os.listdir(glass_files_dir)
     num_in_files = [int(_f.split('_')[2]) for _f in files if 'ascii' in _f]
     num_in_files = np.array(num_in_files, dtype='i8')
+
+    # Check to make sure that we don't have unrealistic expectations
+    if np.max(num_in_files) < allowed_range[0]:
+        raise ValueError(
+            f"There are no glass files above the minimum allowed load of "
+            f"{allowed_range[0]} (highest: {np.max(num_in_files)})!"
+        )
+    if np.min(num_in_files) > allowed_range[1]:
+        raise ValueError(
+            f"There are no glass files below the maximum allowed load of "
+            f"{allowed_range[1]} (lowest: {np.min(num_in_files)})!"
+        )
+
+    # We limit the list of available files to those in the correct load range
+    ind_allowed_files = np.nonzero(
+        (num_in_files >= allowed_range[0]) & (num_in_files <= allowed_range[1])
+    )[0]
+    if len(ind_allowed_files) == 0:
+        raise Exception(
+            "Something is wrong - could not find any allowed glass files.")
+    num_in_files = num_in_files[ind_allowed_files]
+
     index_best = np.abs(num_in_files - num).argmin()
     return num_in_files[index_best]
 
@@ -2996,14 +3077,34 @@ def find_previous_cube(num, min_root=1):
     """Find the highest number <=num that has a cube root."""
     return int(max(np.floor(np.cbrt(num)), min_root)**3)
 
-def find_nearest_cube(num, min_root=1):
-    """Find the cube number closest to num."""
-    root_low = int(max(np.floor(np.cbrt(num)), min_root))
+def find_nearest_cube(num, allowed_range=[1, sys.maxsize]):
+    """
+    Find the cube number closest to num.
+
+    Parameters
+    ----------
+    allowed_range : [int, int], optional
+        The return value must lie in this range.
+
+    Returns
+    -------
+    cube : int
+        The nearest cube integer to num.
+
+    """
+    allowed_range = [find_next_cube(allowed_range[0]),
+                     find_previous_cube(allowed_range[1])
+    ]
+    root_range = np.rint(np.cbrt(allowed_range)).astype(int)
+
+    root = np.clip(np.cbrt(num), root_range[0], root_range[1])
+    root_low = int(np.floor(root))
+    root_high = int(np.ceil(root))
+
     cube_low = root_low**3
-    cube_high = (root_low + 1)**3
-    diff_low = np.abs(cube_low - num)
-    diff_high = np.abs(cube_high - num)
-    if diff_low < diff_high:
+    cube_high = root_high**3
+
+    if np.abs(cube_low - num) < np.abs(cube_high - num):
         return cube_low
     else:
         return cube_high
