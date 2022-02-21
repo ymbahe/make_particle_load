@@ -248,14 +248,17 @@ class MakeMask:
 
             # Parse padding options, if provided
             if self.params['padding_snaps'] is not None:
-                pad_snaps = self.params['padding_snaps'].split()
+                pad_snaps = np.array(
+                    self.params['padding_snaps'].split(), dtype=int)
                 if len(pad_snaps) == 1:
-                    self.params['padding_snaps'] = np.array([pad_snaps[0]])
+                    self.params['padding_snaps'] = pad_snaps[0]
                 else:
                     pad_start = pad_snaps[0]
                     pad_end = pad_snaps[1]
                     if len(pad_snaps) == 2:
                         pad_space = 1
+                    else:
+                        pad_space = pad_snaps[2]
                     self.params['padding_snaps'] = np.arange(
                         pad_start, pad_end+1, pad_space)
             else:
@@ -1001,6 +1004,7 @@ class MakeMask:
             print(f"   ... snapshot {snap}...")
             snapshot_base = self.params['snapshot_base']
             snapshot_file = snapshot_base.replace('$isnap', f'{snap:04d}')
+            print(snapshot_file)
             with h5py.File(snapshot_file, 'r') as f:
                 snap_ids = f['PartType1/ParticleIDs'][...]
                 snap_pos = f['PartType1/Coordinates'][...]
@@ -1016,9 +1020,12 @@ class MakeMask:
             print(f"    ... loaded and matched IDs...")
 
             is_tagged = np.zeros(len(inds), dtype=bool)
-            bounds = np.arange(0, len(inds_target), 1000)
-
+            bounds = np.arange(0, len(inds_target)+1, 1000)
+            if bounds[-1] != len(inds_target):
+                bounds = np.concatenate((bounds, [len(inds_target)]))
+            
             ts = TimeStamp()
+            print(f"Finding current neighbours for {len(inds_target)} target particles.")
             
             nbatch = len(bounds) - 1
             for ibatch in range(nbatch):
@@ -1047,8 +1054,12 @@ class MakeMask:
             ts.set_time('Batches')
             ts.print_time_usage('Finished ngb search', mode='sub')
             inds_tagged = np.nonzero(is_tagged)[0]
-            inds_pad = np.unique(np.concatenate((inds_pad, inds_tagged)))
+            print(f"Found {len(inds_tagged)} neighbours...")
 
+            n_pad_old = len(inds_pad)
+            inds_pad = np.unique(np.concatenate((inds_pad, inds_tagged)))
+            print(f"Padding number updated ({n_pad_old, len(inds_pad)}).")
+            
         return inds_pad
 
     def plot(self, max_npart_per_rank=int(1e5)):
@@ -1208,6 +1219,8 @@ class MakeMask:
 
         # Extract frequently needed attributes for easier structure
         frame = self.region - self.params['centre']
+        frame[0, :] += self.params['highres_diffusion_buffer']
+        frame[1, :] -= self.params['highres_diffusion_buffer']
         bound = np.max(np.abs(frame))
         try:
             r200 = self.params['r200']
@@ -1234,7 +1247,7 @@ class MakeMask:
         fig, axarr = plt.subplots(1, 3, figsize=(13, 4))
 
         ind_filled = np.nonzero(hist_full > 0)
-        vmin, vmax = np.percentile(hist_full[ind_filled], [1, 99.99])
+        vmin, vmax = np.percentile(hist_full[ind_filled], [0.1, 99.99])
 
         # Plot each projection (xy, xz, yz) in a separate panel. `xx` and `yy`
         # denote the coordinate plotted on the x and y axis, respectively.
@@ -1361,6 +1374,9 @@ class Mask:
         self.edges = edges
         self.shape = np.array(self.mask.shape)
 
+        n_med = np.median(n_p[self.mask])
+        print(f"Median number of particles per active mask cell: {n_med}")
+        
         self.box = np.zeros((2, 3))
         for idim in range(3):
             self.box[0, idim] = self.edges[idim][0]
