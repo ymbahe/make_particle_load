@@ -477,12 +477,19 @@ class MakeMask:
             and not self.params['pad_full_cells']):
             inds_pad = self.find_extra_pad_particles(
                 ids, inds_target, inds_pad)
-        
+
+        if len(inds_pad) > 0:
+            r_max = self.primary_radii[inds_pad].max()
+            print(f"Maximum distance of pad particle from selection centre "
+                  f"in primary snapshot is {r_max:.3f} Mpc.")
+        else:
+            print("No padding particles identified!")
+            
         # Find initial (Lagrangian) positions of particles from their IDs
         # (recall that these are really Peano-Hilbert indices).
         # Coordinates are in the same units as the box size.
         self.lagrangian_coords = self.compute_ic_positions(ids)
-
+        
         # Find the corners of a box enclosing all particles in the ICs that
         # are so far identified as "to be treated as high-res". The coordinates
         # are relative to the centre of the box, which is found internally
@@ -507,6 +514,7 @@ class MakeMask:
         # Cells containing at least the specified threshold number of
         # (target / target + pad) particles are True, others are False.
         self.cell_size = self.params['cell_size_mpc']
+        print(f"Mask cell size is {self.cell_size:.3f} Mpc.")
         self.target_mask = Mask(
             self.lagrangian_coords[inds_target], box, self.params)
         self.full_mask = Mask(
@@ -528,6 +536,9 @@ class MakeMask:
         else:
             self.inds_target_xt = self.inds_target
         self.inds_pad = inds_pad
+
+        print(f"There are {len(self.inds_target_xt)} target particles, and "
+              f"{len(self.inds_pad)} padding particles.")
         
         # Expand the full mask with updated padding particles. If applicable,
         # also add entire high-res padding cells around those hosting target
@@ -728,7 +739,8 @@ class MakeMask:
 
         # Make a plot of the selection environment
         self.plot_halo(coords)
-
+        self.primary_radii = np.linalg.norm(coords, axis=1)
+        
         return ids, ind_target, ind_pad
     
     def load_mask_ids(self, primary_ids) -> np.ndarray:
@@ -881,9 +893,10 @@ class MakeMask:
         # If we get here, we either don't care about wrapping issues or the
         # particles are all within the same image of the box. For consistency
         # and simplicity, shift all coordinates to the box centre:
-        origin += ((box[0, :] + box[1, :]) / 2)
-        box -= origin
-        self.lagrangian_coords -= origin
+        shift = (box[0, :] + box[1, :]) / 2
+        origin += shift
+        box -= shift
+        self.lagrangian_coords -= shift
 
         # Although all *selected* particles are guaranteed to be in the same
         # image of the simulation box, there may be others that are still
@@ -993,14 +1006,28 @@ class MakeMask:
         if comm_size > 1:
             raise ValueError("Finding extra padding particles does not work "
                              "over MPI. Sorry.")
-
+        n_pad_initial = len(inds_pad)
+        
         snaps = self.params['padding_snaps']
         if with_primary_snapshot:
             snaps = np.concatenate(([self.params['primary_snapshot']], snaps))
         print("About to search for extra padding particles in snapshots ",
               snaps)
-            
+
+        # Set up a mask to record which particles are tagged as padding
+        is_tagged = np.zeros(len(ids), dtype=bool)
+        is_tagged[inds_pad] = True
+        
+        # As an optimization, we search for neighbours in bunches of target
+        # particles. This avoids potentially severe overheads in constructing
+        # the neighbour list-of-lists below.
+        bounds = np.arange(0, len(inds_target)+1, 10000)
+        if bounds[-1] != len(inds_target):
+            bounds = np.concatenate((bounds, [len(inds_target)]))
+        nbatch = len(bounds) - 1
+        
         for snap in snaps:
+            tx = TimeStamp()
             print(f"   ... snapshot {snap}...")
             snapshot_base = self.params['snapshot_base']
             snapshot_file = snapshot_base.replace('$isnap', f'{snap:04d}')
@@ -1008,7 +1035,10 @@ class MakeMask:
             with h5py.File(snapshot_file, 'r') as f:
                 snap_ids = f['PartType1/ParticleIDs'][...]
                 snap_pos = f['PartType1/Coordinates'][...]
-
+            tx.set_time('Load snapshot data')
+            print(f"    ... loaded data ({tx.get_time():.2f} sec.) ...")
+            
+            # Need to locate all particles we are considering in this snap
             inds, in_snap = xr.find_id_indices(ids, snap_ids)
             if len(in_snap) < len(inds):
                 raise ValueError(
@@ -1017,49 +1047,66 @@ class MakeMask:
                 )
             r = snap_pos[inds, :]
             r_target = r[inds_target, :]
-            print(f"    ... loaded and matched IDs...")
+            tx.set_time('Match particles')
+            print(f"    ... matched IDs ({tx.get_time():.2f} sec.) ...")
 
-            is_tagged = np.zeros(len(inds), dtype=bool)
-            bounds = np.arange(0, len(inds_target)+1, 1000)
-            if bounds[-1] != len(inds_target):
-                bounds = np.concatenate((bounds, [len(inds_target)]))
-            
-            ts = TimeStamp()
-            print(f"Finding current neighbours for {len(inds_target)} target particles.")
-            
-            nbatch = len(bounds) - 1
+            # At this point, `r` holds the coordinates of considered particles
+            # in the current snapshot, sorted in the same way as in the
+            # primary snapshot.
+            print(f"Finding current neighbours for {len(inds_target)} "
+                  "target particles.")
+
+            n_free = np.count_nonzero(is_tagged == False)
             for ibatch in range(nbatch):
                 tss = TimeStamp()
                 print(f"Batch {ibatch+1} / {nbatch}...")
-                if (ibatch < nbatch / 20 or
-                    ibatch in np.linspace(0, nbatch, num=25, dtype=int)):
-                    print(f"   ... build new tree ...")
-                    ind_ngb = np.nonzero(is_tagged == 0)[0]
-                    ngb_tree = cKDTree(r[ind_ngb, :],
-                                       boxsize=self.params['box_size'])
-                    tss.set_time('ngb tree')
 
+                # For efficiency reasons, we periodically rebuild the
+                # neighbour tree, keeping only not-yet-tagged particles.
+                # There is definite room for more optimization here...
+                if ibatch % 10 == 0:
+
+                    # Check whether we should re-build
+                    n_free_now = np.count_nonzero(is_tagged == False)
+                    if (ibatch == 0 or
+                        n_free - n_free_now > 10000 or
+                        n_free_now / n_free < 0.9):
+                        print(f"   ... build new tree ...")
+                        ind_ngb = np.nonzero(is_tagged == False)[0]    
+                        ngb_tree = cKDTree(r[ind_ngb, :],
+                                       boxsize=self.params['box_size'])
+                        tss.set_time('ngb tree')
+                        n_free = n_free_now
+
+                # Build the target tree for (target) particles in batch
                 target_tree = cKDTree(
                     r_target[bounds[ibatch] : bounds[ibatch+1], :],
                     boxsize=self.params['box_size'])
                 tss.set_time('target tree')
+
+                # Query the tree to find neighbours of targets in the full
+                # neighbour tree
                 ngbs_lol = target_tree.query_ball_tree(
                     ngb_tree, r=self.params['highres_padding_width'])
                 tss.set_time('query')
                 for ngbs in ngbs_lol:
                     is_tagged[ind_ngb[ngbs]] = True
+
                 tss.set_time('transcribe')
-                ts.import_times(tss)
+                tx.import_times(tss)
 
-            ts.set_time('Batches')
-            ts.print_time_usage('Finished ngb search', mode='sub')
-            inds_tagged = np.nonzero(is_tagged)[0]
-            print(f"Found {len(inds_tagged)} neighbours...")
-
+            tx.set_time('Batches')
             n_pad_old = len(inds_pad)
-            inds_pad = np.unique(np.concatenate((inds_pad, inds_tagged)))
-            print(f"Padding number updated ({n_pad_old, len(inds_pad)}).")
+            inds_pad = np.nonzero(is_tagged)[0]
+            tx.set_time('Update tagged particles')
+            tx.print_time_usage('Finished ngb search', mode='sub')
+            tx.print_time_usage(f'Finished snap {snap}')
+            print(f"Found {len(inds_pad)} neighbours so far "
+                  f"[snap {snap}, up from {n_pad_old}]...")
             
+        n_pad_final = len(inds_pad)
+        print(f"Increased padding from {n_pad_initial} to {n_pad_final} "
+              "particles.")
         return inds_pad
 
     def plot(self, max_npart_per_rank=int(1e5)):
