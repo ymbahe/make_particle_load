@@ -239,6 +239,8 @@ class ParticleLoad:
         set_none(cparams, 'dm_to_gas_number_ratio')
         set_none(cparams, 'dm_to_gas_mass_ratio')
         set_none(cparams, 'extra_dm_particle_scheme')
+        set_none(cparams, 'zone2_max_mpart_over_zone1')
+        set_none(cparams, 'zone2_max_mpart_msun')
 
         if (cparams['identify_gas'] and not
             cparams['generate_extra_dm_particles']):
@@ -571,7 +573,7 @@ class ParticleLoad:
                 mask_data['extent'] = (
                     f['Coordinates'].attrs.get("bounding_length")) / lbox_mpc
                 mask_data['high_res_volume'] = (
-                    f['Coordinates'].attrs.get("high_res_volume")
+                    f['Params'].attrs.get("high_res_volume")
                     / lbox_mpc**3
                 )
 
@@ -1415,19 +1417,20 @@ class ParticleLoad:
         """Work out the minimum and maximum allowed Zone-II particle loads."""
         min_zone2_load = self.config['min_gcell_load']
         if self.config['zone2_max_mpart_over_zone1'] is not None:
-            mass_ratio = self.config['zone2_max_mpart_over_zone1']
+            mass_ratio = float(self.config['zone2_max_mpart_over_zone1'])
             min_zone2_load = max(min_zone2_load, zone1_gcell_load / mass_ratio)
+
         if self.config['zone2_max_mpart_msun'] is not None:
             gcell_mass_msun = (
                 self.gcube['cell_volume'] * self.sim_box['mass_msun'])
             min_zone2_load = max(
                 min_zone2_load,
-                gcell_mass_msun / self.config['zone2_max_mpart_msun']
+                gcell_mass_msun / float(self.config['zone2_max_mpart_msun'])
             )
 
         # There is always a maximum: must be below the mass of Zone I.
         max_zone2_load = (
-            zone1_gcell_load / self.config['zone2_min_mpart_over_zone1']
+            zone1_gcell_load / float(self.config['zone2_min_mpart_over_zone1'])
         )
 
         # Deal with stupid case of minimum being above maximum...
