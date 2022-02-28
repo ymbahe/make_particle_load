@@ -1355,22 +1355,59 @@ class Mask:
             bin_edges.append(
                 np.linspace(-extent_dim, extent_dim, num=num_cells[idim]+1))
 
-        # Compute the number of particles in each cell, across MPI ranks
-        n_p, edges = np.histogramdd(r, bins=bin_edges)
-        n_p = comm.allreduce(n_p, op=MPI.SUM)
-
-        # Convert particle counts to True/False mask
-        self.mask = (n_p >= params['min_num_per_cell'])
-        self.edges = edges
-        self.shape = np.array(self.mask.shape)
-
-        n_med = np.median(n_p[self.mask])
-        print(f"Median number of particles per active mask cell: {n_med}")
+        build_mask_from_coordinates(
+            r, bin_edges, n_threshold=params['min_num_per_cell'], store=True)
         
         self.box = np.zeros((2, 3))
         for idim in range(3):
             self.box[0, idim] = self.edges[idim][0]
             self.box[1, idim] = self.edges[idim][-1]
+
+    def build_mask_from_coordinates(self, r, edges, n_threshold, store=True):
+        """
+        Build a boolean mask from a set of input coordinates.
+
+        Parameters
+        ----------
+        r : ndarray(float)
+            The coordinates from which to build the mask.
+        edges : list of ndarray(float)
+            A list of n arrays specifying the bin edges in the i-th dimension.
+        n_threshold : int
+            The minimum number of particles for a cell to be classed "active".
+        store : bool, optional
+            Store the computed mask as attribute `self.mask`? Default: True.
+
+        Returns
+        -------
+        mask : ndarray(bool)
+            An array with one element per cell that is True for cells with
+            particles and False for others. Its dimensions depend on the
+            input array `edges`.
+
+        """
+        # Compute the number of particles in each cell, across MPI ranks
+        n_p, hist_edges = np.histogramdd(r, bins=edges)
+        for idim in len(edges):
+            if len(hist_edges[idim]) != len(edges[idim]):
+                raise ValueError("Inconsistent histogram edge length.")
+            if np.count_nonzero(hist_edges[idim] != edges[idim]) > 0:
+                raise ValueError("Inconsistent histogram edge values.")
+        n_p = comm.allreduce(n_p, op=MPI.SUM)
+
+        # Convert particle counts to True/False mask
+        mask = (n_p >= n_threshold)
+        shape = np.array(mask.shape)
+
+        if store:
+            self.mask = mask
+            self.shape = shape
+
+        if comm_rank == 0:
+            n_med = np.median(n_p[mask])
+            print(f"Median number of particles per active mask cell: {n_med}")
+
+        return mask
 
     def set_origin(self, origin):
         self.origin = np.copy(origin)
