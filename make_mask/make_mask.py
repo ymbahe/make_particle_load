@@ -161,7 +161,12 @@ class MakeMask:
             self.params['highres_diffusion_buffer'] = 50.0
             self.params['cell_padding_width'] = 0.0
             self.params['mask_pad_in_mips'] = 3.0
+            self.params['dither_gap'] = None
             
+            # Convert "None" string to None where applicable:
+            set_none(params, 'padding_snaps')
+            set_none(params, 'dither_gap')
+
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
             required_params = [
@@ -463,6 +468,8 @@ class MakeMask:
         if self.params['cell_size_mpc'] == 'auto':
             self.params['cell_size_mpc'] = (
                 self.mips * self.params['cell_size_mips'])
+        if self.params['dither_gap'] is not None:
+            self.params['dither_gap'] *= self.mips
 
         # Load IDs of all possibly relevant particles, and the (sub-)indices
         # of those lying in the target region and within the surrounding
@@ -1356,14 +1363,16 @@ class Mask:
                 np.linspace(-extent_dim, extent_dim, num=num_cells[idim]+1))
 
         build_mask_from_coordinates(
-            r, bin_edges, n_threshold=params['min_num_per_cell'], store=True)
+            r, bin_edges, n_threshold=params['min_num_per_cell'], store=True,
+            dither=params['dither_gap'])
         
         self.box = np.zeros((2, 3))
         for idim in range(3):
             self.box[0, idim] = self.edges[idim][0]
             self.box[1, idim] = self.edges[idim][-1]
 
-    def build_mask_from_coordinates(self, r, edges, n_threshold, store=True):
+    def build_mask_from_coordinates(
+        self, r, edges, n_threshold, store=True, dither=False):
         """
         Build a boolean mask from a set of input coordinates.
 
@@ -1377,6 +1386,11 @@ class Mask:
             The minimum number of particles for a cell to be classed "active".
         store : bool, optional
             Store the computed mask as attribute `self.mask`? Default: True.
+        dither : float or None, optional
+            Offset for dithering to apply before counting particles per cell.
+            Each particle is offset by [-1, 0, +1] * dither in each dimension,
+            for a total of 27 dither positions. If None (default), no
+            dithering is applied and only a single count is taken.
 
         Returns
         -------
@@ -1386,17 +1400,39 @@ class Mask:
             input array `edges`.
 
         """
-        # Compute the number of particles in each cell, across MPI ranks
-        n_p, hist_edges = np.histogramdd(r, bins=edges)
-        for idim in len(edges):
-            if len(hist_edges[idim]) != len(edges[idim]):
-                raise ValueError("Inconsistent histogram edge length.")
-            if np.count_nonzero(hist_edges[idim] != edges[idim]) > 0:
-                raise ValueError("Inconsistent histogram edge values.")
-        n_p = comm.allreduce(n_p, op=MPI.SUM)
+        if dither is None:
+            dr = np.array([0.])
+        else:
+            dr = np.array([-dither, 0., dither])
 
-        # Convert particle counts to True/False mask
-        mask = (n_p >= n_threshold)
+        mask = None
+        for dx in dr:
+            for dy in dr:
+                for dz in dr:
+                    r_curr = np.copy(r)
+                    r_curr[:, 0] += dx
+                    r_curr[:, 1] += dy
+                    r_curr[:, 2] += dz
+
+                    # Compute the number of particles in each cell,
+                    # across MPI ranks
+                    n_p, hist_edges = np.histogramdd(r, bins=edges)
+                    for idim in len(edges):
+                        if len(hist_edges[idim]) != len(edges[idim]):
+                            raise ValueError(
+                                "Inconsistent histogram edge length.")
+                        if np.count_nonzero(hist_edges[idim] != edges[idim]):
+                            raise ValueError(
+                                "Inconsistent histogram edge values.")
+                    n_p = comm.allreduce(n_p, op=MPI.SUM)
+
+                    # Convert particle counts to True/False mask
+                    mask_curr = (n_p >= n_threshold)
+                    if mask is None:
+                        mask = mask_curr
+                    else:
+                        mask += mask_curr   # [False/True] + True = True
+
         shape = np.array(mask.shape)
 
         if store:
@@ -1823,6 +1859,14 @@ def periodic_wrapping(r, boxsize, return_copy=False, mode='centre'):
     r %= boxsize
     r -= shift
 
+
+def set_none(in_dict, key):
+    """Set a dict entry to None if it has the string 'None'"""
+    if key not in in_dict:
+        return
+    if isinstance(in_dict[key], str):
+        if in_dict[key].lower() == 'none':
+            in_dict[key] = None
 
 # Allow using the file as stand-alone script
 if __name__ == '__main__':
