@@ -1362,9 +1362,10 @@ class Mask:
             bin_edges.append(
                 np.linspace(-extent_dim, extent_dim, num=num_cells[idim]+1))
 
-        build_mask_from_coordinates(
+        self.build_mask_from_coordinates(
             r, bin_edges, n_threshold=params['min_num_per_cell'], store=True,
             dither=params['dither_gap'])
+        self.edges = bin_edges
         
         self.box = np.zeros((2, 3))
         for idim in range(3):
@@ -1413,11 +1414,11 @@ class Mask:
                     r_curr[:, 0] += dx
                     r_curr[:, 1] += dy
                     r_curr[:, 2] += dz
-
+                    
                     # Compute the number of particles in each cell,
                     # across MPI ranks
-                    n_p, hist_edges = np.histogramdd(r, bins=edges)
-                    for idim in len(edges):
+                    n_p, hist_edges = np.histogramdd(r_curr, bins=edges)
+                    for idim in range(len(edges)):
                         if len(hist_edges[idim]) != len(edges[idim]):
                             raise ValueError(
                                 "Inconsistent histogram edge length.")
@@ -1548,11 +1549,10 @@ class Mask:
                 )
             
         # Compute number of particles in each cell, across MPI ranks
-        n_p, edges = np.histogramdd(r, bins=new_edges)
-        n_p = comm.allreduce(n_p, op=MPI.SUM)
-
-        # Convert particle counts to True/False mask
-        new_mask = n_p >= self.params['min_num_per_cell']
+        new_mask = self.build_mask_from_coordinates(
+            r, new_edges, n_threshold=self.params['min_num_per_cell'],
+            store=False, dither=self.params['dither_gap']
+        )
 
         # Add in old mask
         new_mask[extra_low[0]:new_shape[0]-extra_high[0],
