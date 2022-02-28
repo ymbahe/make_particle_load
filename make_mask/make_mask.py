@@ -913,63 +913,6 @@ class MakeMask:
 
         return box, origin
 
-    def build_basic_mask(self, r, inds_target, inds_pad, mask_box):
-        """
-        Build the basic mask for an input particle distribution.
-
-        This is a cubic boolean array with an adaptively computed cell size and
-        extent that stretches by at least `min_width` in each dimension.
-        The mask value is True for any cells that contain at least the
-        specified threshold number of particles.
-
-        The mask is based on particles on all MPI ranks.
-
-        Parameters
-        ----------
-        r_target : ndarray(float) [N_p, 3]
-            The coordinates of (local) particles for which to create the mask.
-            They must be shifted such that they lie within +/- `min_width` from
-            the origin in each dimension.
-        r_pad : ndarray(float) [N_p, 3]
-            As r_target, but holding the particles that are only included for
-            padding.
-        mask_box : ndarray(float) [3]
-            The full side length of the mask along each dimension (must be
-            identical across MPI ranks). It is clipped to the box size.
-
-        Returns
-        -------
-        target_mask : Mask object
-            The mask for the target region (without padding).
-        full_mask : Mask object
-            The mask for the entire high-resolution region (with padding).
-        
-        """
-        # Find out how far from the origin we need to extend the mask
-        widths = np.clip(mask_box, 0, self.params['box_size'])
-
-        # Work out how many cells we need along each dimension so that the
-        # cells remain below the specified threshold size
-        num_cells = np.ceil(widths / self.params['cell_size_mpc']).astype(int)
-
-        # Compute number of particles in each cell, across MPI ranks
-        n_p_target, edges = np.histogramdd(
-            r[inds_target, :], bins=num_cells,
-            range=[(-w/2, w/2) for w in widths]
-        )
-        n_p_pad, edges = np.histogramdd(
-            r[inds_pad, :], bins=num_cells,
-            range=[(-w/2, w/2) for w in widths]
-        )
-        n_p_target = comm.allreduce(n_p_target, op=MPI.SUM)
-        n_p_full = comm.allreduce(n_p_target + n_p_pad, op=MPI.SUM)
-
-        # Convert particle counts to True/False mask
-        mask_target = n_p_target >= self.params['min_num_per_cell']
-        mask_full = n_p_full >= self.params['min_num_per_cell']
-
-        return Mask(mask_target, edges), Mask(mask_full, edges)
-
     def find_extra_pad_particles(
         self, ids, inds_target, inds_pad, with_primary_snapshot=False):
         """
