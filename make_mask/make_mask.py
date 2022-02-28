@@ -475,9 +475,14 @@ class MakeMask:
         # of those lying in the target region and within the surrounding
         # padding zone. Only particles assigned to the current MPI rank are "
         # loaded, which may be none.
-        ids, inds_target, inds_pad = self.load_primary_ids()
+        if self.params['direct_primary_load'] == 1:
+            ids, inds_target, inds_pad = self.load_primary_ids_direct()
+        else:
+            ids, inds_target, inds_pad = self.load_primary_ids()
+
         self.inds_target = inds_target
         
+
         # If desired, identify additional padding particles in other snapshots.
         # This is currently only possible in non-MPI runs.
         if (len(self.params['padding_snaps']) > 0
@@ -750,6 +755,95 @@ class MakeMask:
         
         return ids, ind_target, ind_pad
     
+    def load_primary_ids_direct(self):
+        """
+        Load IDs of particles in and near the specified high-res region.
+
+        This includes both "target" particles that are within the specified
+        region in the primary snapshot, and "padding" particles that surround
+        the target high-res region.
+
+        If run on multiple MPI ranks, this only load the particles belonging
+        to the current rank, which may be none.
+
+        In addition, relevant metadata are loaded and stored in the
+        `self.params` dict.        
+
+        Returns
+        -------
+        ids_target : ndarray(int)
+            The particle IDs of the primary target particles (i.e. those in
+            the target high-res region).
+        ids_pad : ndarray(int)
+            The IDs of additional padding particles that should also be
+            treated as high-res, but are not within the target region. This
+            may be empty, especially if self.params['highres_padding_width']
+            is zero.
+
+        """
+        # To make life simpler, extract some frequently used parameters
+        cen = self.params['centre']
+        shape = self.params['shape']
+
+        with h5py.File(self.params['snapshot_file'], 'r') as f:
+            coords = f['PartType1/Coordinates'][...] - cen
+            ids = f['PartType1/ParticleIDs'][...]
+
+        # Periodic wrapping if required
+        periodic_wrapping(coords, self.params['box_size'])
+
+        # Select particles within target region
+        l_unit = self.params['length_unit']
+        ind_primary = None
+
+        if shape == 'sphere':
+            if comm_rank == 0:
+                print(f"Clipping to sphere around {cen}, with radius "
+                      f"{self.params['hr_radius']:.4f} {l_unit}")
+
+            dists = np.linalg.norm(coords, axis=1)
+            ind_target = np.where(dists <= self.params['hr_radius'])[0]
+            r_padded = (self.params['hr_radius'] +
+                        self.params['highres_padding_width'])
+            ind_pad = np.nonzero(
+                (dists > self.params['hr_radius']) & (dists <= r_padded))[0]
+
+        elif self.params['shape'] in ['cuboid', 'slab']:
+            if comm_rank == 0:
+                print(f"Clipping to {shape} with "
+                      f"dx={self.params['dim'][0]:.2f} {l_unit}, "
+                      f"dy={self.params['dim'][1]:.2f} {l_unit}, "
+                      f"dz={self.params['dim'][2]:.2f} {l_unit}\n"
+                      f"around {cen} {l_unit}.")
+
+            # To find particles within target cuboid, normalize each coordinate
+            # offset by the maximum allowed extent in the corresponding
+            # dimension, and find those where the result is between -1 and 1
+            # for all three dimensions
+            l_target = self.params['dim'] / 2
+            l_padded = l_target + self.params['highres_padding_width']
+            ind_target = np.where(
+                np.max(np.abs(coords / l_target), axis=1) <= 1)[0]
+            ind_pad = np.where(
+                (np.max(np.abs(coords / l_target), axis=1) > 1) &
+                (np.max(np.abs(coords / l_padded), axis=1) <= 1)
+            )[0]
+        else:
+            raise ValueError(f"Invalid shape {self.params['shape']}")
+
+        # If IDs are Peano-Hilbert indices multiplied by two (as in e.g.
+        # simulations with baryons), need to undo this multiplication here
+        if self.params['divide_ids_by_two']:
+            ids //= 2
+
+        print(f'[Rank {comm_rank}] Loaded {len(ids)} dark matter particles')
+
+        # Make a plot of the selection environment
+        self.plot_halo(coords)
+        self.primary_radii = np.linalg.norm(coords, axis=1)
+        
+        return ids, ind_target, ind_pad
+
     def load_mask_ids(self, primary_ids) -> np.ndarray:
         """
         Find the IDs of all particles that must be included in the mask.
