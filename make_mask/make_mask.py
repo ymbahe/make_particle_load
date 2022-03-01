@@ -162,10 +162,12 @@ class MakeMask:
             self.params['cell_padding_width'] = 0.0
             self.params['mask_pad_in_mips'] = 3.0
             self.params['dither_gap'] = None
+            self.params['pad_lcs_as_particles'] = False
             
-            # Convert "None" string to None where applicable:
+            # Convert "None"/"True"/"False" strings where applicable:
             set_none(params, 'padding_snaps')
             set_none(params, 'dither_gap')
+            set_none(params, 'pad_lcs_as_particles')
 
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
@@ -501,7 +503,8 @@ class MakeMask:
         # (recall that these are really Peano-Hilbert indices).
         # Coordinates are in the same units as the box size.
         self.lagrangian_coords = self.compute_ic_positions(ids)
-        
+        self.ids = ids
+
         # Find the corners of a box enclosing all particles in the ICs that
         # are so far identified as "to be treated as high-res". The coordinates
         # are relative to the centre of the box, which is found internally
@@ -1060,6 +1063,8 @@ class MakeMask:
             snaps = np.concatenate(([self.params['primary_snapshot']], snaps))
         print("About to search for extra padding particles in snapshots ",
               snaps)
+        if self.params['pad_lcs_as_particles']:
+            snaps = np.concatenate(([-1], snaps))
 
         # Set up a mask to record which particles are tagged as padding
         is_tagged = np.zeros(len(ids), dtype=bool)
@@ -1076,14 +1081,19 @@ class MakeMask:
         for snap in snaps:
             tx = TimeStamp()
             print(f"   ... snapshot {snap}...")
-            snapshot_base = self.params['snapshot_base']
-            snapshot_file = snapshot_base.replace('$isnap', f'{snap:04d}')
-            print(snapshot_file)
-            with h5py.File(snapshot_file, 'r') as f:
-                snap_ids = f['PartType1/ParticleIDs'][...]
-                snap_pos = f['PartType1/Coordinates'][...]
-            tx.set_time('Load snapshot data')
-            print(f"    ... loaded data ({tx.get_time():.2f} sec.) ...")
+
+            if snap >= 0:
+                snapshot_base = self.params['snapshot_base']
+                snapshot_file = snapshot_base.replace('$isnap', f'{snap:04d}')
+                print(snapshot_file)
+                with h5py.File(snapshot_file, 'r') as f:
+                    snap_ids = f['PartType1/ParticleIDs'][...]
+                    snap_pos = f['PartType1/Coordinates'][...]
+                tx.set_time('Load snapshot data')
+                print(f"    ... loaded data ({tx.get_time():.2f} sec.) ...")
+            else:
+                snap_pos = self.lagrangian_coords
+                snap_ids = self.ids
             
             # Need to locate all particles we are considering in this snap
             inds, in_snap = xr.find_id_indices(ids, snap_ids)
@@ -1964,6 +1974,10 @@ def set_none(in_dict, key):
     if isinstance(in_dict[key], str):
         if in_dict[key].lower() == 'none':
             in_dict[key] = None
+        if in_dict[key].lower() == 'true':
+            in_dict[key] = True
+        if in_dict[key].lower() == 'false':
+            in_dict[key] = False
 
 # Allow using the file as stand-alone script
 if __name__ == '__main__':

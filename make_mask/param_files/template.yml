@@ -25,6 +25,8 @@ divide_ids_by_two: False               # Switch to divide input particle IDs by 
 min_num_per_cell:  3                   # [Optional] Minimum number of particles per cell (default 3). Cells with fewer than `min_num_per_cell` particles are ignored
 mpc_cell_size:     3.                  # [Optional] Cell size (default 3.)
 select_from_vr:    True                # Switch to select automatic selection of target haloes from Velociraptor catalogue, based on settings in `AUTOMATIC GROUP SELECTION` below. If False, the position and extent of the target region must be specified manually below (`MANUAL GROUP SELECTION`).
+dither_gap:        None                # [Optional] Dithering offset to be applied to Lagragian particle positions before binning to uniform grid [mips]. Default: None, no dithering.
+pad_lcs_as_particles: False            # [Optional] Should the Lagrangian coordinates be padded like any other snapshot? Default: False.
 
 highres_padding_width:  1.             # Width of padding margin applied around high-res region.
 
