@@ -788,7 +788,10 @@ class MakeMask:
         with h5py.File(self.params['snapshot_file'], 'r') as f:
             coords = f['PartType1/Coordinates'][...] - cen
             ids = f['PartType1/ParticleIDs'][...]
-
+            self.params['box_size'] = f['Header'].attrs['BoxSize'][0]
+            self.params['length_unit'] = 'Mpc'
+            self.zred_snap = f['Header'].attrs['Redshift'][0]
+            
         # Periodic wrapping if required
         periodic_wrapping(coords, self.params['box_size'])
 
