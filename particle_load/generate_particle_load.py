@@ -2430,7 +2430,8 @@ class ParticleLoad:
                 self.sim_box['num_basepart_equiv'])
             g.attrs.create('N_BasePart_Equiv',
                 self.sim_box['n_basepart_equiv'])
-
+            g.attrs.create('CentreInParent', self.centre)
+            
             for key in self.cosmo:
                 g.attrs[key] = self.cosmo[key]
 
@@ -3299,6 +3300,13 @@ def get_cosmology_params(name):
         cosmo['hubbleParam'] = 0.6766
         cosmo['sigma8'] = 0.8102
         cosmo['linear_powerspectrum_file'] = 'EAGLE_XL_powspec_18-07-2019.txt'
+    elif name == 'DES3yr':
+        cosmo['Omega0'] = 0.306
+        cosmo['OmegaLambda'] = 0.694
+        cosmo['OmegaBaryon'] = 0.0486
+        cosmo['hubbleParam'] = 0.681
+        cosmo['sigma8'] = 0.807
+        cosmo['linear_powerspectrum_file'] = 'extended_planck_linear_powspec'
     else:
         raise ValueError(f"Invalid cosmology '{name}'!")
 
