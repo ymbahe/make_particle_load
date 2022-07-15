@@ -13,6 +13,7 @@ from pdb import set_trace
 def main():
     args = parse_arguments()
     swiftICs = SwiftICs(args)
+    #swiftICs.shift_and_truncate(args)
     swiftICs.isolate_gas(args)
     swiftICs.remap_ids(args)
     swiftICs.save(args)
@@ -94,8 +95,24 @@ class SwiftICs:
             meta['OmegaBaryon'] = h.attrs['OmegaBaryon']
             meta['N_Part_Equiv'] = h.attrs['N_Part_Equiv']
 
+            try:
+                meta['Centre'] = h.attrs['CentreInParent']
+            except:
+                meta['Centre'] = None
+                print("No CentreInParent...")
+                
         return meta
 
+    def shift_and_truncate(self, args):
+        """Shift zoom region to box centre and truncate box size."""
+
+        self.pt1['Coordinates'] -= self.meta['Centre']
+        self.pt2['Coordinates'] -= self.meta['Centre']
+
+        if not args.truncate_to_size:
+            return
+        
+    
     def isolate_gas(self, args):
         """Isolate gas particles, if desired."""
         if not args.isolate_gas:
@@ -231,7 +248,8 @@ class SwiftICs:
             # Bake in metadata for simulation setup
             m = f.create_group('Metadata')
             for key in self.meta:
-                m.attrs[key] = self.meta[key]
+                if self.meta[key] is not None:
+                    m.attrs[key] = self.meta[key]
 
             
 def parse_arguments():
@@ -268,7 +286,12 @@ def parse_arguments():
         help="Particle load metadata file, to isolate gas particles. "
              "By default, this is `particle_load_info.hdf5' in workdir."
     )
-
+    parser.add_argument(
+        '-t' , '--truncate_to_size',
+        help='Truncate box size to specified value, after shifting '
+             'the target object to the centre.'
+    )
+    
     args = parser.parse_args()
 
     if args.input_file_name is None:
