@@ -3,14 +3,14 @@ Collection of functions to replicate a given kernel.
 
 All functions have the same signature:
 kernel : ndarray(float)
-	The kernel, already expanded for the additional particles. The original
-	particles, in the range [-0.5, 0.5], are the first num_orig entries.
+    The kernel, already expanded for the additional particles. The original
+    particles, in the range [-0.5, 0.5], are the first `num_orig` entries.
 ips : float
     The mean inter-particle spacing of the input kernel. In the (implicitly
     assumed, but not neccessary) situation that the kernel is a cubic grid,
     this is equal to the side length of its fundamental cubic cell.
 num_orig : int
-	The number of particles in the original kernel.
+    The number of particles in the original `kernel`.
 
 The functions return None; `kernel` is updated in-place.
 
