@@ -189,6 +189,9 @@ class MakeMask:
             if 'snapshot_file' not in params:
                 params['snapshot_file'] = params['snapshot_base'].replace(
                     '$isnap', f"{params['primary_snapshot']:04d}")
+            if 'vr_file' in params and 'primary_snapshot' in params:
+                params['vr_file'] = params['vr_file'].replace(
+                    '$isnap', f"{params['primary_snapshot']:04d}")
 
             # Run checks for automatic group selection
             if params['select_from_vr']:
@@ -321,6 +324,7 @@ class MakeMask:
         # Look up the target halo index in Velociraptor catalogue
         vr_index = self.find_halo_index()
 
+        print(f"Reading data from [{self.params['vr_file']}]")
         with h5py.File(self.params['vr_file'], 'r') as vr_file:
 
             # First, determine the radius of the high-res region
@@ -484,7 +488,12 @@ class MakeMask:
 
         self.inds_target = inds_target
         
-
+        # Find initial (Lagrangian) positions of particles from their IDs
+        # (recall that these are really Peano-Hilbert indices).
+        # Coordinates are in the same units as the box size.
+        self.lagrangian_coords = self.compute_ic_positions(ids)
+        self.ids = ids
+        
         # If desired, identify additional padding particles in other snapshots.
         # This is currently only possible in non-MPI runs.
         if (len(self.params['padding_snaps']) > 0
@@ -499,11 +508,6 @@ class MakeMask:
         else:
             print("No padding particles identified!")
             
-        # Find initial (Lagrangian) positions of particles from their IDs
-        # (recall that these are really Peano-Hilbert indices).
-        # Coordinates are in the same units as the box size.
-        self.lagrangian_coords = self.compute_ic_positions(ids)
-        self.ids = ids
 
         # Find the corners of a box enclosing all particles in the ICs that
         # are so far identified as "to be treated as high-res". The coordinates
