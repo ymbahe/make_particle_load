@@ -8,11 +8,6 @@ import subprocess
 from scipy.spatial import distance
 from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
-from mpi4py import MPI
-import parallel_functions as pf
-from scipy.io import FortranFile
-import time
-import kernel_replications as kr
 
 # Append modules directory to PYTHONPATH
 sys.path.append(
@@ -22,6 +17,26 @@ sys.path.append(
         "tools"
     )
 )
+
+try:
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    comm_rank = comm.Get_rank()
+    comm_size = comm.Get_size()
+
+except ImportError:
+    print("Could not load mpi4py, running in serial mode")
+    comm_rank = 0
+    comm_size = 1
+    from dummy import DummyComm, DummyMPI
+    comm = DummyComm()
+    MPI = DummyMPI()
+    
+import parallel_functions as pf
+from scipy.io import FortranFile
+import time
+import kernel_replications as kr
+
 
 import param_file_routines as pr
 
@@ -44,9 +59,6 @@ sys.path.append(
 )
 from timestamp import TimeStamp
 
-comm = MPI.COMM_WORLD
-comm_rank = comm.Get_rank()
-comm_size = comm.Get_size()
 
 rng = np.random.default_rng()
 
@@ -1393,10 +1405,13 @@ class ParticleLoad:
         if self.verbose:
             num_parts_by_type_all = (
                 np.zeros_like(num_parts_by_type) if comm_rank==0 else None)
-            comm.Reduce([num_parts_by_type, MPI.LONG],
-                        [num_parts_by_type_all, MPI.LONG],
-                        op = MPI.SUM, root = 0
-            )
+            if comm_size > 1:
+                comm.Reduce([num_parts_by_type, MPI.LONG],
+                            [num_parts_by_type_all, MPI.LONG],
+                            op = MPI.SUM, root = 0
+                )
+            else:
+                num_parts_by_type_all = num_parts_by_type
             if comm_rank == 0:
                 print(
                     f"Total number of Zone I/II particles by resolution "
@@ -3044,6 +3059,10 @@ def mpi_combine_arrays(a, send_to_all=True, unicate=False, root=0):
     array([0., 0., 0., 1., 1., 1.])   # with 2 MPI ranks
 
     """
+    if comm_size == 1:
+        ret_array = np.unique(a) if unicate else a.copy()
+        return ret_array
+
     n_elem_by_rank = comm.allgather(a.shape[0])
     offset_by_rank = np.concatenate(([0], np.cumsum(n_elem_by_rank)))
 
@@ -3322,7 +3341,7 @@ def set_none(in_dict, key):
     if isinstance(in_dict[key], str):
         if in_dict[key].lower() == 'none':
             in_dict[key] = None
-            
+
 
 if __name__ == '__main__':
     only_calc_ntot = False
