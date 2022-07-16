@@ -16,6 +16,12 @@ A concise overview of how to use these scripts is provided in `QUICKSTART.rst`.
 For a more detailed description of features and available options, please see
 the `/docs` subdirectory.
 
+Parent simulation type
+----------------------
+Only `SWIFT` simulations with `VELOCIraptor` halo catalogues are supported as
+input for generating masks. Support for `GADGET`/`SUBFIND` input has been dropped
+in favour of better support for `SWIFT`.
+
 Installation
 ------------
 This repository provides top-level scripts, rather than an importable
