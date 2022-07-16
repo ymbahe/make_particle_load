@@ -30,6 +30,7 @@ The following external libraries are required:
 - `h5py`
 - `scipy`
 - `astropy`
+- `cython`
 
 You can ensure that they are installed by running
 ```bash
@@ -45,31 +46,12 @@ These can be installed by running
 python3 -m pip install -r requirements-opt.txt
 ```
 
-[OLD BELOW]
-
-As part of the particle load production, the `MakeGrid.pyx` is written in Cython and need to be compiled prior any use.
-you can translate `MakeGrid.pyx` into native C code and compile it into a binary image using
+**Note**: The particle load generator (sub-directory `particle_load`)
+contains a module written in Cython for efficiency (`auxiliary_tools.pyx`).
+This _should_ compile automatically through `pyximport`. If that fails for some
+reason, please compile `auxiliary_tools.pyx` manually with
 ```bash
-cythonize -i MakeGrid.pyx
+python3 setup.py build_ext --inplace
 ```
-run in the same directory as `MakeGrid.pyx`. This operation produces the `MakeGrid.c` file, which encloses a C-translation
-of the original Cython syntax and the `MakeGrid.cpython-*.so` shared object, which is the file that the Python interpreter
-will actually point to when the `import` command is called. You may remove `MakeGrid.c` as it is only used by the Cython compiler 
-to generate the shared object and is not needed by any other scripts at runtime.
-
-
-
-Debug tips
--------
-This section contains some useful debugging tips related to dependency configurations.
-
-In order to check that you have the correct `PYTHONPATH` environment variable set-up and that all your dependencies are 
-visible to the Python interpreter, you can print your current `PYTHONPATH` using
-```python
-import sys
-print(sys.path)
-```
-The output contains a list of the directories, including the ones you have appended with `sys.path.append()`. We 
-discourage the use of `os.environ['PYTHONPATH']`, as it may produce OS platform-dependent outputs, while its `sys` 
-equivalent is platform-independent. If your custom directory appears in the `sys.path`, but the code exits with an
-`ImportError`, check that the module is placed in the correct directory.
+(The shorter `cythonize -i auxiliary_tools.pyx` tends to get stuck finding
+the numpy headers, especially when running in virtual environments).
