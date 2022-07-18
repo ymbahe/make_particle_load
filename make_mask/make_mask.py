@@ -284,10 +284,7 @@ class MakeMask:
                 else:
                     pad_start = pad_snaps[0]
                     pad_end = pad_snaps[1]
-                    if len(pad_snaps) == 2:
-                        pad_space = 1
-                    else:
-                        pad_space = pad_snaps[2]
+                    pad_space = 1 if len(pad_snaps) == 2 else pad_snaps[2]
                     self.params['padding_snaps'] = np.arange(
                         pad_start, pad_end+1, pad_space)
             else:
