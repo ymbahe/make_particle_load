@@ -9,15 +9,32 @@ from typing import Tuple
 from warnings import warn
 from scipy import ndimage
 from scipy.spatial import cKDTree
-import matplotlib.patches as patches
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-from mpi4py import MPI
+
+try:
+    import matplotlib.patches as patches
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+
+    # Set up Matplotlib
+    mpl.rcParams['text.usetex'] = True
+    mpl.rcParams['font.family'] = 'serif'
+    mpl.rcParams['font.serif'] = 'Palatino'
+
+except ModuleNotFoundError:
+    print('matplotlib not found...')
+    mpl = None
+    
 from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
 
 from pdb import set_trace
 
+try:
+    from mpi4py import MPI
+except ModuleNotFoundError:
+    print('mpi4py not found... This may not work yet.')
+    MPI = None
+    
 # ---------------------------------------
 # Load utilities from `modules` directory
 # ---------------------------------------
@@ -50,14 +67,15 @@ except ImportError:
 
 # Set up MPI support. We do this at a global level, so that all functions
 # can access the communicator easily
-comm = MPI.COMM_WORLD
-comm_rank = comm.rank
-comm_size = comm.size
-
-# Set up Matplotlib
-mpl.rcParams['text.usetex'] = True
-mpl.rcParams['font.family'] = 'serif'
-mpl.rcParams['font.serif'] = 'Palatino'
+if MPI is not None:
+    comm = MPI.COMM_WORLD
+    comm_rank = comm.rank
+    comm_size = comm.size
+else:
+    comm = None
+    comm_rank = 0
+    comm_size = 1
+    
 
 
 class MakeMask:
@@ -163,6 +181,7 @@ class MakeMask:
             self.params['mask_pad_in_mips'] = 3.0
             self.params['dither_gap'] = None
             self.params['pad_lcs_as_particles'] = False
+            self.params['direct_primary_load'] = 0
             
             # Convert "None"/"True"/"False" strings where applicable:
             set_none(params, 'padding_snaps')
@@ -294,7 +313,8 @@ class MakeMask:
             self.params = None
 
         # Broadcast the read and processed dict to all ranks.
-        self.params = comm.bcast(self.params)
+        if comm is not None:
+            self.params = comm.bcast(self.params)
 
     def find_highres_sphere(self) -> Tuple[np.ndarray, float, int]:
         """
@@ -644,7 +664,10 @@ class MakeMask:
         else:
             m_part = None
 
-        self.m_part_base = comm.bcast(m_part)
+        if comm is None:
+            self.m_part_base = m_part
+        else:
+            self.m_part_base = comm.bcast(m_part)
         return self.m_part_base
 
     def load_primary_ids(self):
@@ -1179,6 +1202,8 @@ class MakeMask:
         to access (a subset of) the particles stored on them.
 
         """
+        if mpl is None:
+            return
         if comm_rank == 0:
             print("Plotting Lagrangian region...")
         axis_labels = ['x', 'y', 'z']
@@ -1200,8 +1225,9 @@ class MakeMask:
         indices_pad = np.random.choice(np_pad, n_sample_pad, replace=False)
         pad_coords = self.lagrangian_coords[pad_inds[indices_pad], :]
 
-        plot_coords = comm.gather(plot_coords)
-        pad_coords = comm.gather(pad_coords)
+        if comm is not None:
+            plot_coords = comm.gather(plot_coords)
+            pad_coords = comm.gather(pad_coords)
 
         # Only need rank 0 from here on, combine all particles there.
         if comm_rank != 0:
@@ -1323,6 +1349,8 @@ class MakeMask:
         to access (a subset of) the particles stored on them.
 
         """
+        if mpl is None:
+            return
         axis_labels = ['x', 'y', 'z']
 
         # Extract frequently needed attributes for easier structure
@@ -1343,10 +1371,13 @@ class MakeMask:
                 range=[[-bound, bound], [-bound, bound]]
             )
 
-        hist_full = np.zeros((3, 200, 200)) if comm_rank == 0 else None
-        comm.Reduce([hists, MPI.DOUBLE],
-                    [hist_full, MPI.DOUBLE],
-                    op=MPI.SUM, root=0)
+        if comm is None:
+            hist_full = np.copy(hists)
+        else:
+            hist_full = np.zeros((3, 200, 200)) if comm_rank == 0 else None
+            comm.Reduce([hists, MPI.DOUBLE],
+                        [hist_full, MPI.DOUBLE],
+                        op=MPI.SUM, root=0)
 
         # Only need rank 0 from here on, combine all particles there.
         if comm_rank != 0:
@@ -1536,7 +1567,8 @@ class Mask:
                         if np.count_nonzero(hist_edges[idim] != edges[idim]):
                             raise ValueError(
                                 "Inconsistent histogram edge values.")
-                    n_p = comm.allreduce(n_p, op=MPI.SUM)
+                    if comm is not None:
+                        n_p = comm.allreduce(n_p, op=MPI.SUM)
 
                     # Convert particle counts to True/False mask
                     mask_curr = (n_p >= n_threshold)
@@ -1921,7 +1953,7 @@ def find_vertices(r, serial_only=False):
         box[1, :] = np.max(r, axis=0)
 
     # Now compare min/max values across all MPI ranks
-    if not serial_only:
+    if not serial_only and comm is not None:
         for idim in range(3):
             box[0, idim] = comm.allreduce(box[0, idim], op=MPI.MIN)
             box[1, idim] = comm.allreduce(box[1, idim], op=MPI.MAX)
