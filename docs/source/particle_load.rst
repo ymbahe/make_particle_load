@@ -4,6 +4,7 @@
 Create particle load and ic_gen parameter file
 ==============================================
 
+
 Overview
 --------
 The "particle load" is the unperturbed distribution of particles (at redshift
@@ -35,11 +36,6 @@ automatically generated, as well as a SLURM submit script. Submitting the
     $ sbatch < submit.sh
 
 within the output directory.
-
-.. toctree::
-   :hidden:
-
-   particle_load_algorithm
 
 
 Instructions
@@ -132,3 +128,7 @@ To come.
 
 
 
+.. toctree::
+   :hidden:
+
+   particle_load_algorithm
