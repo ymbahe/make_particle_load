@@ -23,6 +23,15 @@ to prevent contamination of the target region with low-resolution particles
 in the simulation run due to slight differences in particle trajectories
 between parent and zoom simulations.
 
+A more detailed description of how the mask is created can be found
+:ref:`here <make_mask_method>`.
+
+.. toctree::
+   :hidden:
+
+   make_mask_method
+
+     
 Instructions
 ------------
 The mask generator is located in the ``make_mask`` directory. To run it, first
@@ -74,9 +83,58 @@ instead. A brief description of all possible settings is given in
 
 Mask file description
 ---------------------
-To be provided.
+
+The mask is saved as an HDF5 file with the following structure
+
+::
+
+    mask.hdf5
+    ├── Params (group, attributes only)
+    ├── Coordinates
+    ├── FullMask
+    └── TargetMask
+        ├── Coordinates
+	└── FullMask
+
+* ``/Params`` is an empty group that contains, as attributes, every parameter
+  in the parameter file (including implicitly set optional ones).
+* ``/Coordinates`` contains the coordinates of the centres of all cells that
+  are part of the mask (i.e. cells whose volume must be filled with high-
+  resolution particles in the particle load). Coordinates are in Mpc, and
+  are given relative to the mask centre. The dataset has four quantitative
+  attributes:
+
+  * ``bounding_length``: the full length of the longest side of the mask
+    (i.e. the side length of a cube that contains the whole mask volume),
+    in Mpc.
+  * ``geo_centre``: the geometric centre of the mask within the parent
+    simulation LCs, in Mpc.
+  * ``grid_cell_width``: the side length of each cubic mask cell, in Mpc.
+  * ``mask_corners``: The lower and upper vertices of a box (not necessarily
+    a cube) that encloses all mask cells, in Mpc (relative to ``geo_centre``).
+
+* ``/FullMask`` is a boolean 3D array with shape (n_x, n_y, n_z), the
+  number of grid cells in each dimension from which the mask is selected.
+  The array is ``True`` for cells that are part of the mask, and ``False`` for
+  others. In addition to the four attributes of ``Coordinates``, which are
+  copied for convenience, there are three additional attributes:
+
+  * ``x_edges``: 1D array containing the edges of all cells along the x axis
+    (in Mpc, relative to ``geo_centre``).
+  * ``y_edges``: as ``x_edges``, but along the y axis.
+  * ``z_edges``: as ``x_edges``, but along the z axis.
+
+  The grid described by ``FullMask`` typically extends beyond the actual
+  mask, so that the lowest (highest) values of ``x_edges``, ``y_edges``, and
+  ``z_edges`` are generally below (above) those in ``mask_corners``.
+  However, each cell marked as ``True`` corresponds exactly to one of the
+  entries in ``Coordinates``.
+
+* ``/TargetMask/Coordinates`` and ``TargetMask/FullMask`` are analogous to
+  ``/Coordinates`` and ``/FullMask``, but for a special mask that only
+  considers target particles and no padding. This is only output for possible
+  diagnostic purposes, and not used anywhere in the particle load generation.
+   
 
 
-Code description
-----------------
-To be provided.
+
