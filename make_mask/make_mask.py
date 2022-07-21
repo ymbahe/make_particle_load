@@ -277,10 +277,13 @@ class MakeMask:
 
             # Parse padding options, if provided
             if self.params['padding_snaps'] is not None:
+                if isinstance(self.params['padding_snaps'], int):
+                    self.params['padding_snaps'] = (
+                        f"{self.params['padding_snaps']}")
                 pad_snaps = np.array(
                     self.params['padding_snaps'].split(), dtype=int)
                 if len(pad_snaps) == 1:
-                    self.params['padding_snaps'] = pad_snaps[0]
+                    self.params['padding_snaps'] = np.array([pad_snaps[0],])
                 else:
                     pad_start = pad_snaps[0]
                     pad_end = pad_snaps[1]
@@ -1465,7 +1468,14 @@ class MakeMask:
             # Push parameter file data as file attributes
             g = f.create_group('Params')
             for param_attr in self.params:
-                g.attrs.create(param_attr, self.params[param_attr])
+                try:
+                    g.attrs.create(param_attr, self.params[param_attr])
+                except TypeError:
+                    att_value = self.params[param_attr]
+                    if att_value is None:
+                        g.attrs.create(param_attr, "None")
+                    else:
+                        g.attrs.create(param_attr, "[Object]")
 
             if self.params['shape'] in ['cuboid', 'slab']:
                 high_res_volume = np.prod(self.params['dim'])
@@ -2007,9 +2017,9 @@ def set_none(in_dict, key):
     if isinstance(in_dict[key], str):
         if in_dict[key].lower() == 'none':
             in_dict[key] = None
-        if in_dict[key].lower() == 'true':
+        elif in_dict[key].lower() == 'true':
             in_dict[key] = True
-        if in_dict[key].lower() == 'false':
+        elif in_dict[key].lower() == 'false':
             in_dict[key] = False
 
 # Allow using the file as stand-alone script
