@@ -361,6 +361,9 @@ Output options
 
 ic_gen options
 ^^^^^^^^^^^^^^
+The following parameters regulate general and I/O related aspects of the
+`ic_gen` interface:
+
 * ``generate_param_files``: Master switch to auto-generate an `ic_gen`
   parameter file (default: ``True``, alternative: ``False``).
 * ``generate_submit_files``: Master switch to auto-generate a SLURM submit
@@ -375,7 +378,88 @@ ic_gen options
 * ``icgen_exec``: [REQUIRED] The path to the `ic_gen` executable. It can either
   be given as an absolute path, or relative to ``icgen_work_dir``. With the
   :ref:`default file structure <structure>`, this is ``../../IC_Gen.x``.
+* ``icgen_powerspec_dir``: [REQUIRED] The directory containing the power
+  spectrum files that `ic_gen` uses as input. With the
+  :ref:`default file structure <structure>`, this is ``../..``.
+* ``icgen_power_spectrum_file``: Name of the power spectrum file to use instead
+  of the one corresponding to the specified cosmology. Only use this option if
+  you know what you are doing.
+* ``icgen_module_setup``: [REQUIRED] The file that should be sourced in order
+  to set up the correct module environment for `ic_gen`. Set to ``None`` to
+  not source anything.
 
+Next, we have some parameters that affect the setup of `ic_gen`:
 
+* ``icgen_num_species``: The number of DM particle species that `ic_gen`
+  should distinguish between. By default, this is ``1`` for uniform-volume
+  simulations and ``2`` for zooms (high-resolution and boundary particles).
+  Note that this is independent of whether (and how) gas particles are
+  generated.
+* ``icgen_nmaxpart``: The maximum number of particles per MPI rank that
+  `ic_gen` can handle. This must be consistent with what was used during
+  `ic_gen` compilation (default: 36045928).
+* ``icgen_nmaxdisp``: The maximum number of displacement entries that
+  `ic_gen` can handle, must be consistent with what was used during compilation
+  of `ic_gen`. Default: 791048437.
+* ``icgen_runtime_hours``: The maximum run time of the `ic_gen` SLURM job
+  in hours (default: ``4.0``).
+
+The following two parameters specify the particle IDs assigned by `ic_gen`:
+
+* ``icgen_use_PH_IDs``: Should Particle IDs be assigned as Peano-Hilbert
+  indices? Default is ``True``.
+* ``icgen_PH_nbit``: If IDs are assigned as Peano-Hilbert indices, this
+  specifies the corresponding grid level (2**nbit cells per dimension).
+  Default is 21, which is the maximum value that can be accommodated by a
+  64-bit integer in 3D (21 * 3 = 63).
+
+`ic_gen` uses an FFT grid to compute the displacement field for all particles.
+The following parameters affect the behaviour of this grid:
+
+* ``icgen_fft_to_gcube_ratio``: The side length of the FFT mesh used within
+  `ic_gen` in units of the gcube side length. Default is ``1.0``.
+* ``fft_min_Nyquist_factor``: Minimum size of the FFT mesh in units of the
+  number of high-resolution particles per dimension (extrapolated to the full
+  simulation box for zooms). The default is ``2.0``.
+* ``fft_n_base``: The base factor for the FFT grid size. The grid is set up
+  to have this number times a power of two cells per dimension. Note that this
+  number must be consistent with what was used to generate the Panphasian
+  phase descriptor (default: ``3``).
+* ``fft_n_min``: Minimum FFT grid size per dimension (default: ``1536``).
+* ``icgen_multigrid``: Switch to enable the multi-grid mode for the FFT,
+  in case of zooms (default: ``True``).
+
+`ic_gen` can be configured to generate constrained-realisation ICs. This is
+enabled with the following parameter:
+
+* ``icgen_num_constraints``: Number of phase constraints (default: 0, i.e.
+  generate "standard" unconstrained ICs).
+
+If ``icgen_num_constraints`` > 0, the constraints are specified as additional
+parameters (all with a default value of ``'%dummy'``). It is assumed that
+you know what you are doing if you use these...
+
+* ``icgen_constraint_phase_descriptor``: Phase descriptor string
+* ``icgen_constraint_phase_descriptor_levels``: Constraint levels
+* ``icgen_constraint_phase_descriptor_path``: Path of constraint
+
+In addition, if ``icgen_num_constraints`` > 1, a second constraint can be
+specified through the following three parameters:
+
+* ``icgen_constraint_phase_descriptor2``: Phase descriptor string
+* ``icgen_constraint_phase_descriptor2_levels``: Constraint levels
+* ``icgen_constraint_phase_descriptor2_path``: Path of constraint
+
+Finally, there are five parameters that provide information for the SLURM
+batch submit system. They are only required if the corresponding information
+was not registered in ``local.py`` during installation:
+
+* ``slurm_partition``: The partition name to which the `ic_gen` job should
+  be submitted.
+* ``slurm_account``: The SLURM account to use for the `ic_gen` job.
+* ``slurm_email``: The email address to which SLURM should send updates
+  about the `ic_gen` job.
+* ``memory_per_core``: The available memory per core on the system, in GB.
+* ``num_cores_per_node``: The number of cores per node.
 
 
