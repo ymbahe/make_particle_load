@@ -2010,9 +2010,9 @@ def set_none(in_dict, key):
     if isinstance(in_dict[key], str):
         if in_dict[key].lower() == 'none':
             in_dict[key] = None
-        if in_dict[key].lower() == 'true':
+        elif in_dict[key].lower() == 'true':
             in_dict[key] = True
-        if in_dict[key].lower() == 'false':
+        elif in_dict[key].lower() == 'false':
             in_dict[key] = False
 
 # Allow using the file as stand-alone script
