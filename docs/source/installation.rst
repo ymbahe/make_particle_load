@@ -78,3 +78,17 @@ particular when running in virtual environments.
 In either case, the manual compilation only has to be done once (and the
 intermediate ``auxiliary_tools.c`` file can be deleted afterwards), unless
 you make changes to ``auxiliary_tools.pyx``.
+
+Local system configuration
+--------------------------
+To make the automatic generation of `ic_gen` input files easier, a number of
+parameters of your system can be specified in the ``local.py`` file. To
+prevent git from accidentally overriding these during updates (or from pushing
+these system-specific values to the central repository), it is best to tell
+git to ignore these changes once they are made:
+
+.. code-block:: bash
+
+    $ git update-index --assume-unchanged local.py
+
+
