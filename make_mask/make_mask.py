@@ -1468,7 +1468,14 @@ class MakeMask:
             # Push parameter file data as file attributes
             g = f.create_group('Params')
             for param_attr in self.params:
-                g.attrs.create(param_attr, self.params[param_attr])
+                try:
+                    g.attrs.create(param_attr, self.params[param_attr])
+                except TypeError:
+                    att_value = self.params[param_attr]
+                    if att_value is None:
+                        g.attrs.create(param_attr, "None")
+                    else:
+                        g.attrs.create(param_attr, "[Object]")
 
             if self.params['shape'] in ['cuboid', 'slab']:
                 high_res_volume = np.prod(self.params['dim'])
