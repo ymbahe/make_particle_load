@@ -25,7 +25,7 @@ III" is filled with concentric cubic shells of cells that increase
 progressively in size outwards, and only contain a single particle each, with
 a mass that increases propertional to the cell volume.
 
-.. image:: zs_gp_fig1.png.001.png
+.. image:: ZoneLayout.png
   :width: 400
   :alt: Simulation box division
 
