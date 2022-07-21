@@ -71,7 +71,7 @@ options in the form of
 
 A short summary of all available parameters is provided in the master template
 file (``template_param_files/template.yml``); a more detailed description
-is provided :ref:`here <particle_load_params>`.
+is provided :ref:`here <particle_load_algorithm>`.
 
 At minimum, the following values should be adjusted:
 
@@ -116,15 +116,9 @@ Finally, if the local system values were not specified in ``local.py`` during
 * ``num_cores_per_node``: Number of cores per node.
 
   
-.. toctree::
-   :hidden:
-
-   particle_load_params
-
-
 Detailed description
 --------------------
-To come.
+See :ref:`here <particle_load_algorithm>`.
 
 
 
