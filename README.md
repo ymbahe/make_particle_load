@@ -13,8 +13,13 @@ Scripts are provided to
 - Configure a `SWIFT` parameter file with appropriate values for the ICs 
 
 A concise overview of how to use these scripts is provided in `QUICKSTART.rst`.
-For a more detailed description of features and available options, please see
-the `/docs` subdirectory.
+For a more detailed description of features and available options, please refer
+to the documentation in the `docs` subdirectory. This can be built with
+```bash
+cd docs
+make html
+```
+and then be viewed at `docs/build/html/index.html`.
 
 Parent simulation type
 ----------------------
@@ -61,3 +66,16 @@ python3 setup.py build_ext --inplace
 ```
 (The shorter `cythonize -i auxiliary_tools.pyx` tends to get stuck finding
 the numpy headers, especially when running in virtual environments).
+
+Specify local system parameters
+-------------------------------
+To make the automatic generation of `ic_gen` input files easier, a number of
+parameters of your system can be specified in the ``local.py`` file. To
+prevent git from accidentally overriding these during updates (or from pushing
+these system-specific values to the central repository), it is best to tell
+git to ignore these changes once they are made:
+
+.. code-block:: bash
+
+    $ git update-index --assume-unchanged local.py
+
