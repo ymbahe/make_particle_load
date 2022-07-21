@@ -18,6 +18,15 @@ sys.path.append(
     )
 )
 
+# Append parent directory to PYTHONPATH
+sys.path.append(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir
+    )
+)
+from local import local
+
 try:
     from mpi4py import MPI
     comm = MPI.COMM_WORLD
@@ -344,11 +353,11 @@ class ParticleLoad:
             'icgen_powspec_dir': '../..',
 
             # System-specific parameters
-            'slurm_partition': None,
-            'slurm_account': None,
-            'slurm_email': None,
-            'memory_per_core': 18.2e9,
-            'num_cores_per_node': 28,
+            'slurm_partition': local['slurm_partition'],
+            'slurm_account': local['slurm_account'],
+            'slurm_email': local['slurm_email'],
+            'memory_per_core': local['memory_per_core'],
+            'num_cores_per_node': local['cpus_per_node'],
         }
         
         xparams = {}

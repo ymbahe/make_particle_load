@@ -1,7 +1,7 @@
 zoom-setup
 ==========
 
-Welcome	to the `zoom-setup`	tools. This	repository contains a collection of
+Welcome	to the `zoom-setup` tools. This	repository contains a collection of
 python scripts to set up zoom simulations through the `ic_gen` IC generator,
 in particular in a format suitable for use with	the public
 [SWIFT](http://swift.dur.ac.uk) code.
@@ -19,13 +19,13 @@ the `/docs` subdirectory.
 Parent simulation type
 ----------------------
 Only `SWIFT` simulations with `VELOCIraptor` halo catalogues are supported as
-input for generating masks. Support for `GADGET`/`SUBFIND` input has been dropped
-in favour of better support for `SWIFT`.
+input for generating masks. Support for `GADGET`/`SUBFIND` input has been
+dropped in favour of better support for `SWIFT`.
 
 Installation
 ------------
-This repository provides top-level scripts, rather than an importable
-package. Simply clone the repository to your local system with 
+This repository provides top-level scripts, rather than an importable package.
+Simply clone the repository to your local system with 
 ```bash
 git clone https://github.com/ymbahe/zoom-setup.git
 ```
