@@ -1391,7 +1391,10 @@ class MakeMask:
         fig, axarr = plt.subplots(1, 3, figsize=(13, 4))
 
         ind_filled = np.nonzero(hist_full > 0)
-        vmin, vmax = np.percentile(hist_full[ind_filled], [0.1, 99.99])
+        if len(ind_filled) > 0:
+            vmin, vmax = np.percentile(hist_full[ind_filled], [0.1, 99.99])
+        else:
+            vmin, vmax = 0, 1
 
         # Plot each projection (xy, xz, yz) in a separate panel. `xx` and `yy`
         # denote the coordinate plotted on the x and y axis, respectively.
@@ -1827,11 +1830,17 @@ class Mask:
         """Compute the boundary of active cells."""
         ind_sel = np.where(self.mask)   # 3-tuple of ndarrays!
         self.mask_box = np.zeros((2, 3))
-        for idim in range(3):
-            edges = self.edges[idim]
-            ind_dim = ind_sel[idim]
-            self.mask_box[0, idim] = np.min(edges[ind_dim])
-            self.mask_box[1, idim] = np.max(edges[ind_dim + 1])
+
+        if len(ind_sel[0]) > 0:
+            for idim in range(3):
+                edges = self.edges[idim]
+                ind_dim = ind_sel[idim]
+                self.mask_box[0, idim] = np.min(edges[ind_dim])
+                self.mask_box[1, idim] = np.max(edges[ind_dim + 1])
+        else:
+            # If there are no active mask cells at all, we artificially
+            # set the min/max to 0
+            self.mask_box[...] = 0
 
         self.mask_widths = self.mask_box[1, :] - self.mask_box[0, :]
         self.mask_extent = np.max(self.mask_widths)
