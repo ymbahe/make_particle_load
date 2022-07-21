@@ -277,10 +277,13 @@ class MakeMask:
 
             # Parse padding options, if provided
             if self.params['padding_snaps'] is not None:
+                if isinstance(self.params['padding_snaps'], int):
+                    self.params['padding_snaps'] = (
+                        f"{self.params['padding_snaps']}")
                 pad_snaps = np.array(
                     self.params['padding_snaps'].split(), dtype=int)
                 if len(pad_snaps) == 1:
-                    self.params['padding_snaps'] = pad_snaps[0]
+                    self.params['padding_snaps'] = np.array([pad_snaps[0],])
                 else:
                     pad_start = pad_snaps[0]
                     pad_end = pad_snaps[1]
