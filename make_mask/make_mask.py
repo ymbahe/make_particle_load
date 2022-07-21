@@ -77,7 +77,6 @@ else:
     comm_size = 1
     
 
-
 class MakeMask:
     """
     Class to construct and save a mask.
@@ -269,11 +268,17 @@ class MakeMask:
             if self.params['select_from_vr']:
                 self.params['centre'], self.params['hr_radius'], vr_index = (
                     self.find_highres_sphere())
+            elif self.params['shape'] == 'sphere':
+                self.params['hr_radius'] = self.params['radius']
 
-            self.params['fname'] = (
-                self.params['fname'].replace('$vr', f'{vr_index}'))
-            self.params['output_dir'] = (
-                self.params['output_dir'].replace('$vr', f'{vr_index}'))
+            # Replace VR halo placeholders (if-checks are there to avoid
+            # an error when manual target region selection is used)
+            if '$vr' in self.params['fname']:
+                self.params['fname'] = (
+                    self.params['fname'].replace('$vr', f'{vr_index}'))
+            if '$vr' in self.params['output_dir']:
+                self.params['output_dir'] = (
+                    self.params['output_dir'].replace('$vr', f'{vr_index}'))
 
             # Parse padding options, if provided
             if self.params['padding_snaps'] is not None:
@@ -1360,7 +1365,7 @@ class MakeMask:
         bound = np.max(np.abs(frame))
         try:
             r200 = self.params['r200']
-        except AttributeError:
+        except KeyError:
             r200 = None
             
         ind_sel = np.nonzero(np.max(np.abs(pos), axis=1) <= bound)[0]
