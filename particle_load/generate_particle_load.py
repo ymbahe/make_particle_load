@@ -8,6 +8,7 @@ import subprocess
 from scipy.spatial import distance
 from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
+import argparse
 
 # Append modules directory to PYTHONPATH
 sys.path.append(
@@ -26,6 +27,7 @@ sys.path.append(
     )
 )
 from local import local
+from tools import utils
 
 try:
     from mpi4py import MPI
@@ -80,6 +82,8 @@ class ParticleLoad:
 
     Parameters
     ----------
+    args : object
+        Structure containing the command-line arguments from argparse.
     param_file : str
         The name of the YAML parameter file containing the settings for the
         particle load creation.
@@ -101,7 +105,7 @@ class ParticleLoad:
         (default: False, not fully implemented).
 
     """
-    def __init__(self, param_file: str,
+    def __init__(self, args, param_file: str = None,
                  randomize: bool = False, only_calc_ntot: bool = False,
                  verbose: bool = False, save_data: bool = True,
                  save_metadata: bool = True,
@@ -118,7 +122,9 @@ class ParticleLoad:
         ts = TimeStamp()
         
         # Read and process the parameter file.
-        self.read_param_file(param_file)
+        if param_file is None:
+            param_file = args.param_file
+        self.read_param_file(param_file, override_params=args.params)
         self.sim_box = self.initialize_sim_box()
         self.mask_data, self.centre = self.load_mask_file()
 
@@ -131,6 +137,8 @@ class ParticleLoad:
         # Generate particle load.
         self.nparts = {}
         self.scube = {}
+        if args.dry_run:
+            only_calc_ntot = True
         self.parts, tss = self.make_particle_load(only_calc_ntot=only_calc_ntot)
 
         ts.import_times(tss)
@@ -148,19 +156,23 @@ class ParticleLoad:
             tss = self.save_particle_load(randomize=randomize)
             ts.import_times(tss)
         ts.set_time('Save particle load')
-        if save_metadata:
+        if save_metadata and not only_calc_ntot:
             tss = self.save_metadata()
             ts.import_times(tss)
         ts.set_time('Save metadata')
 
         ts.print_time_usage('Finished')
             
-    def read_param_file(self, param_file: str) -> None:
+    def read_param_file(
+            self, param_file: str, override_params: dict = None)-> None:
         """Read in parameters for run."""
 
         # Read params from YAML file on rank 0, then broadcast to other ranks.
         if comm_rank == 0:
             params = yaml.safe_load(open(param_file))
+            if isinstance(override_params, dict):
+                for key in override_params:
+                    params[key] = override_params[key]
         else:
             params = None            
         params = comm.bcast(params, root=0)
@@ -685,7 +697,7 @@ class ParticleLoad:
 
         # If this is a "dry run" and we only want the particle number, quit.
         if only_calc_ntot:
-            return ts
+            return None, ts
 
         # -------------------------------------------------------------------
         # ------ Act II: Creation (generate and verify particles) ----------
@@ -3352,9 +3364,37 @@ def set_none(in_dict, key):
             in_dict[key] = None
 
 
-if __name__ == '__main__':
-    only_calc_ntot = False
-    if len(sys.argv) > 2:
-        only_calc_ntot = True if int(sys.argv[2]) == 1 else False
+def parse_arguments():
+    """Parse the input arguments into a structure."""
 
-    ParticleLoad(sys.argv[1], only_calc_ntot=only_calc_ntot)
+    parser = argparse.ArgumentParser(
+	description="Set up the particle load for a zoom simulation.")
+    parser.add_argument(
+        'param_file', help='Parameter file with settings.')
+    parser.add_argument(
+        '-p', '--params',
+        help='[Optional] Override one or more entries in the parameter file.'
+             'The format is name1: value1[, name2: value2, ...]'
+    )
+    parser.add_argument(
+        '-d', '--dry_run',
+        help='Dry run -- only calculate the number of particles and memory '
+             'requirements, but do not actually generate particles.',
+        action='store_true'
+    )
+
+    args = parser.parse_args()
+
+    # Process parameter override values here...
+    args.params = utils.process_param_string(args.params)
+
+    # Some sanity checks
+    if not os.path.isfile(args.param_file):
+        raise OSError(f"Could not find parameter file {args.param_file}!")
+
+    return args
+
+
+if __name__ == '__main__':
+    args = parse_arguments()
+    ParticleLoad(args)
