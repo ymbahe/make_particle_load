@@ -269,11 +269,11 @@ class ParticleLoad:
             cparams['icgen_work_dir'] = (
                 f"{cparams['icgen_object_dir']}/{params['sim_name']}")
 
-        set_none(cparams, 'dm_to_gas_number_ratio')
-        set_none(cparams, 'dm_to_gas_mass_ratio')
-        set_none(cparams, 'extra_dm_particle_scheme')
-        set_none(cparams, 'zone2_max_mpart_over_zone1')
-        set_none(cparams, 'zone2_max_mpart_msun')
+        utils.set_none(cparams, 'dm_to_gas_number_ratio')
+        utils.set_none(cparams, 'dm_to_gas_mass_ratio')
+        utils.set_none(cparams, 'extra_dm_particle_scheme')
+        utils.set_none(cparams, 'zone2_max_mpart_over_zone1')
+        utils.set_none(cparams, 'zone2_max_mpart_msun')
 
         if (cparams['identify_gas'] and not
             cparams['generate_extra_dm_particles']):
@@ -3353,15 +3353,6 @@ def get_cosmology_params(name):
     cosmo['OmegaDM'] = cosmo['Omega0'] - cosmo['OmegaBaryon']
 
     return cosmo
-
-
-def set_none(in_dict, key):
-    """Set a dict entry to None if it has the string 'None'"""
-    if key not in in_dict:
-        return
-    if isinstance(in_dict[key], str):
-        if in_dict[key].lower() == 'none':
-            in_dict[key] = None
 
 
 def parse_arguments():

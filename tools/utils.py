@@ -34,7 +34,27 @@ def process_param_string(param_string):
                 value_num = float(value)
             except ValueError:
                 value_num = value
-            
+
+        if value.lower() == 'none':
+            value_num = None
+        if value.lower() == 'true':
+            value_num = True
+        if value.lower() == 'false':
+            value_num = False
+
         param_dict[name] = value_num
 
     return param_dict
+
+
+def set_none(in_dict, key):
+    """Set a dict entry to None if it has the string 'None'"""
+    if key not in in_dict:
+        return
+    if isinstance(in_dict[key], str):
+        if in_dict[key].lower() == 'none':
+            in_dict[key] = None
+        elif in_dict[key].lower() == 'true':
+            in_dict[key] = True
+        elif in_dict[key].lower() == 'false':
+            in_dict[key] = False

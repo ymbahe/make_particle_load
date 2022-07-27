@@ -198,9 +198,9 @@ class MakeMask:
             self.params['direct_primary_load'] = 0
             
             # Convert "None"/"True"/"False" strings where applicable:
-            set_none(params, 'padding_snaps')
-            set_none(params, 'dither_gap')
-            set_none(params, 'pad_lcs_as_particles')
+            utils.set_none(params, 'padding_snaps')
+            utils.set_none(params, 'dither_gap')
+            utils.set_none(params, 'pad_lcs_as_particles')
 
             # Define a list of parameters that must be provided. An error
             # is raised if they are not found in the YAML file.
@@ -2037,19 +2037,6 @@ def periodic_wrapping(r, boxsize, return_copy=False, mode='centre'):
     r += shift
     r %= boxsize
     r -= shift
-
-
-def set_none(in_dict, key):
-    """Set a dict entry to None if it has the string 'None'"""
-    if key not in in_dict:
-        return
-    if isinstance(in_dict[key], str):
-        if in_dict[key].lower() == 'none':
-            in_dict[key] = None
-        elif in_dict[key].lower() == 'true':
-            in_dict[key] = True
-        elif in_dict[key].lower() == 'false':
-            in_dict[key] = False
 
 
 def parse_arguments():
