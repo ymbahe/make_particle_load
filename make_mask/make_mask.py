@@ -9,6 +9,7 @@ from typing import Tuple
 from warnings import warn
 from scipy import ndimage
 from scipy.spatial import cKDTree
+import argparse
 
 try:
     import matplotlib.patches as patches
@@ -121,11 +122,14 @@ class MakeMask:
     None
     """
 
-    def __init__(self, param_file=None, params=None, save=True, plot=True):
+    def __init__(self, args, param_file=None, params=None, save=True,
+                 plot=True):
 
         # Parse the parameter file, check for consistency, and determine
         # the centre and radius of high-res sphere around a VR halo if desired.
-        self.read_param_file(param_file, params)
+        if param_file is None:
+            param_file = args.param_file
+        self.read_param_file(param_file, params, override_params=args.params)
         
         # Create the actual mask...
         self.make_mask()
@@ -140,7 +144,7 @@ class MakeMask:
         if save and comm_rank == 0:
             self.save()
 
-    def read_param_file(self, param_file, params):
+    def read_param_file(self, param_file, params, override_params=None):
         """
         Read parameters from a specified YAML file.
 
@@ -152,10 +156,16 @@ class MakeMask:
         structure instead, and `param_file` is ignored. Parameters are still
         checked and processed in the same way. Otherwise, `params` is ignored.
 
+        The optional `override_params` can provide a dict of parameter name/
+        value pairs that will override entries in `params` or the parameter
+        file (or provide them, if they don't exist yet).
+
         If the parameter file specifies the target centre in terms of a
         particular Velociraptor halo, the centre and radius of the high-res
         region are determined internally.
 
+        Note:
+        -----
         In the MPI version, the file is only read on one rank and the dict
         then broadcast to all other ranks.
 
@@ -165,6 +175,10 @@ class MakeMask:
             if not isinstance(params, dict):
                 params = yaml.safe_load(open(param_file))
 
+            if isinstance(override_params, dict):
+                for key in override_params:
+                    params[key] = override_params[key]
+                
             # Set default values for optional parameters
             self.params = {}
             self.params['min_num_per_cell'] = 3
@@ -2036,6 +2050,74 @@ def set_none(in_dict, key):
         elif in_dict[key].lower() == 'false':
             in_dict[key] = False
 
+
+def parse_arguments():
+    """Parse the input arguments into a structure."""
+
+    parser = argparse.ArgumentParser(
+	description="Generate a mask for a zoom simulation.")
+    parser.add_argument(
+        'param_file', help='Parameter file with settings for the mask.')
+    parser.add_argument(
+        '-p', '--params',
+        help='[Optional] Override one or more entries in the parameter file.'
+             'The format is name1: value1[, name2: value2, ...]'
+    )
+
+    args = parser.parse_args()
+
+    # Process parameter override values here...
+    args.params = process_param_string(args.params)
+                
+    # Some sanity checks
+    if not os.path.isfile(args.param_file):
+        raise OSError(f"Could not find parameter file {args.param_file}!")
+
+    return args
+
+
+def process_param_string(param_string):
+    """
+    Parse a string of parameter name/value pairs into a dict.
+    
+    The input string is assumed to be of the format
+    'name1: value1, name2: value2, ...'. It will be converted to a dict
+    with keys name1, name2, ... and associated values value1, value2, ...
+
+    """
+    # Deal with None or empty input -- empty dict
+    if param_string is None:
+        return {}
+    if ':' not in param_string:
+        return {}
+
+    param_list = param_string.split(',')
+
+    param_dict = {}
+    for param in param_list:
+        elements = param.split(':')
+
+        # Remove possible white space around separators and dictify
+        name = elements[0].strip()
+        value = elements[1].strip()
+
+        # Attempt to convert float and int values to numbers
+        try:
+            value_num = int(value)
+        except ValueError:
+            
+            try:
+                value_num = float(value)
+            except ValueError:
+                value_num = value
+            
+        param_dict[name] = value_num
+
+    return param_dict
+    
+    
 # Allow using the file as stand-alone script
 if __name__ == '__main__':
-    MakeMask(sys.argv[1])
+    args = parse_arguments()                                   
+    MakeMask(args)              
+
