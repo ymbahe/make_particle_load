@@ -3,10 +3,25 @@
 import subprocess
 import pytest
 
+# Check whether test data are present. For simplicity, we only check for one
+# snapshot file, since the script downloads everything together.
+import os
+if not os.path.exists(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        os.pardir,
+        'TEST_DATA/EAGLE_L100_3e10/snapshots/snapshot_0006.hdf5'
+    )
+):
+    test_data_not_found = True
+else:
+    test_data_not_found = False
+
 import glob
 
 param_files = glob.glob('make_mask_tests/*.yml')
 
+@pytest.mark.skipif(test_data_not_found, reason="Requires test data!")
 @pytest.mark.parametrize("param_file", param_files)
 def test_mm(param_file):
     succ = subprocess.call(
@@ -30,6 +45,7 @@ param_variations = [
     "min_num_per_cell: 5",
 ]
 
+@pytest.mark.skipif(test_data_not_found, reason="Requires test data!")
 @pytest.mark.parametrize("params", param_variations)
 def test_mm_variations(params):
     succ = subprocess.call(
