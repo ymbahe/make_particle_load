@@ -1,0 +1,78 @@
+# Full template parameter file for particle load generation.
+# See also template_zoom and template_uniform for templates specifically adapted to zoom and uniform-volume simulations, respectively.
+
+# MAIN PARTICLE LOAD PARAMETERS #
+sim_name:                 L100_group_zoom   # [REQUIRED] A label for the ICs, used amongst others as the base name for ICs files.
+cosmology:                Planck2018    # [REQUIRED] The cosmology to be used by IC_Gen and (if enabled) written to the simulation parameter file. Must be one of 'Planck2013' or 'Planck2018'.
+target_mass:                1e9        # [Semi-optional] Desired mass of target-resolution particles; the actually used mass is generally slightly different to accommodate an integer cube number of glass files. If it is not specified, uniform_particle_number must be.
+target_mass_type:           dmo         # Specifies whether `target_mass` refers to the mass of 'gas', 'dm', their 'mean' (only if gas is identified) or 'dmo' (only if gas is not identified). Default: gas
+
+# BARYON GENERATION #
+identify_gas:                 False     # Should gas particles directly be identified in the particle load?
+generate_extra_dm_particles:  False     # Should extra DM particles be generated instead of assigning subsets of grid/glass particles as DM and gas (default: False)? Only relevant if `identify_gas` is True.
+extra_dm_particle_scheme:     None      # Scheme to place extra DM particles relative to their "parent" gas particles in case of ambiguity (default: None, use defaults based on `dm_to_gas_number_ratio`). Options are 'face' (default) or 'edge' [N = 3, 4]; 'square' [N = 4]; 'subcube' (default) or 'diamond' [N = 7].  
+dm_to_gas_number_ratio:       None      # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle numbers? REQUIRED if `generate_extra_dm_particles` is True. Otherwise, if not specified (or None), dm_to_gas_mass_ratio must be.
+dm_to_gas_mass_ratio:         1.0       # [Semi-optional] If gas is to be identified in the particle load, what would be the ideal ratio of DM to gas particle masses? If not spefified (or None), dm_to_gas_number_ratio must be.    
+
+# I/O SETTINGS #
+icgen_object_dir:      ../TEST_DATA/ICs/ic_gen/DEMO_L100_ZOOM   # [Semi-optional] IC_Gen base directory for all ICs of this object. If it is not specified, icgen_work_dir must be.
+output_formats:        Fortran       # Format(s) for writing particle loads (comma separated if multiple). Default: Fortran (required for IC_Gen); HDF5 is also possible.
+max_numpart_per_file:  64000000       # Maximum number of particles to write to a single Fortran particle load file. Default is 400**3 = 64000000; empirically, larger values can lead to run-time errors.
+glass_files_dir:       ../particle_load/glass_files  # Directory in which the glass files are stored (default: ./glass_files). Only needed if zone1_type or zone2_type is glass.
+
+# PARTICLE LOAD DETAILS #
+zone1_gcell_load:            1331     # Desired number of particles per highest-resolution gcell. Default: 11^3 = 1331
+zone1_type:                  glass    # Pattern type to use for highest-resolution gcells: `glass' (default) or `grid'.
+zone2_type:                  glass    # Pattern type to use for Zone-II gcells: `glass' (default) or `grid'.
+zone2_mpart_factor_per_mpc:  1.0      # Desired mass increase in Zone-II gcells per Mpc distance from Zone I (default: 1.0).
+zone2_min_mpart_over_zone1:  1.5      # Minimum particle mass in Zone II vs. Zone I (default: 1.5). Must be >= 1.0.
+zone2_max_mpart_over_zone1:  None     # Maximum particle mass in Zone II vs. Zone I (default: None, no limit).
+zone2_max_mpart_msun:        None     # Maximum particle mass in Zone II in M_Sun (default: None, no limit).
+min_gcell_load:              8        # Minimum number of particles per gcell (default: 8).
+zone3_ncell_factor:          0.5      # Decrease in cell size at the Zone-II/III boundary (default: 0.5).
+zone3_min_n_cells:           20       # Minimum required number of particles per dimension for Zone-III layers (default: 20).
+zone3_max_n_cells:           1000     # Maximum allowed number of particles per dimension for Zone-III layers (default: 1000).
+
+# ZOOM-SPECIFIC OPTIONS #
+is_zoom:             True             # [REQUIRED] Is this a zoom simulation?
+mask_file:           mask_L100_group.hdf5   # [REQUIRED] The mask file to use for the particle load (only significant if is_zoom is True). If icgen_object_dir is specified and mask_file exists in it, this is used. Otherwise, it must be an absolute path or relative to the current working directory.
+gcube_n_buffer_cells:       2         # Number of gcells per dimension to add beyond the volume specified by the mask (default: 2). 
+gcube_min_size_mpc:         0.0       # Minimum size of the gcube in Mpc (default: 0).
+
+# HIGH-LEVEL OPTIONS FOR SETTING UP SUBSEQUENT CODES #
+generate_param_files:   True           # Auto-generate parameter files (default: True)?
+generate_submit_files:  True           # Auto-generate submit files (default: True)?
+code_types:             IC_Gen         # Codes to generate files for (Default and only option: IC_Gen)
+z_initial:              127.0          # [REQUIRED] Redshift to generate ICs at (only needed if param or submit files are to be generated).
+
+# OPTIONS FOR SETTING UP IC_GEN #
+panphasian_descriptor:   "[Panph1,L16,(31250,23438,39063),S12,CH1050187043,EAGLE_L0100_VOL1]"      # [REQUIRED] String encoding the phases to use for the ICs from the Panphasia field.
+icgen_exec:               ../../IC_Gen.x    # [REQUIRED] Location of IC_Gen executable (absolute or relative to icgen_work_dir).
+icgen_powerspec_dir:      ../..      # [REQUIRED] Directory containing the power spectrum file (absolute or relative to icgen_work_dir).
+icgen_power_spectrum_file: None       # Name of the power spectrum file to use if not the default one for the chosen cosmology. USE WITH CARE!
+icgen_module_setup:       ~/.module_load_icgen   # [REQUIRED] File to source in order to set up the correct environment for IC_Gen (None to not source anything). 
+icgen_num_species:        1           # Number of DM particle species that IC_Gen should generate. Default is 1 for uniform-volume sims, 2 for zooms (this is independent of gas generation).
+icgen_fft_to_gcube_ratio: 1.0         # Side length of FFT mesh in units of the gcube side length (default: 1).
+icgen_nmaxpart:           36045928    # Maximum number of particles per rank allowed by IC_Gen (default: 36045928).
+icgen_nmaxdisp:           791048437   # Maximum number of displacement entries allowed by IC_Gen (default: 791048437).
+icgen_use_PH_IDs:         True        # Assign Particle IDs based on Peano-Hilbert index (default: True)?
+icgen_PH_nbit:            21          # Depth of Peano-Hilbert grid for assigning particle IDs (default: 21).
+fft_min_Nyquist_factor:   2           # Minimum size of FFT mesh in units of the (uniform-equivalent) number of particles per dimension (default: 2).
+fft_n_base:               3           # Base factor for FFT grid size; FFT grid is a power of two times this number. Must be consistent with what was used to calculate Panphasian descriptor (default: 3).
+fft_n_min:                1536        # Minimum FFT grid size, irrespective of particle number (default: 1536).
+icgen_multigrid:          True        # For zoom ICs, should IC_Gen use multi-grid FFT? Default: True.
+icgen_runtime_hours:      4           # Runtime in hours to request for IC_Gen job (default: 4).
+icgen_num_constraints:    0           # Number of phase constraints for constrained realisation ICs (default: 0, unconstrained).
+icgen_constraint_phase_descriptor:   '%dummy'   # Phase descriptor string for constrained-realisation ICs (only meaningful if icgen_num_constraints > 0).
+icgen_constraint_phase_descriptor_levels: '%dummy' # Constraint phase descriptor levels (only meaningful if icgen_num_constraints > 0).
+icgen_constraint_phase_descriptor_path: '%dummy' # Constraint phase descriptor path (only meaningful if icgen_num_constraints > 0).
+icgen_constraint_phase_descriptor2:   '%dummy'   # Second phase descriptor string for constrained-realisation ICs (only meaningful if icgen_num_constraints > 1).
+icgen_constraint_phase_descriptor2_levels: '%dummy' # Second constraint phase descriptor levels (only meaningful if icgen_num_constraints > 1).
+icgen_constraint_phase_descriptor2_path: '%dummy' # Second constraint phase descriptor path (only meaningful if icgen_num_constraints > 1).
+
+# PARAMETERS FOR TARGET SYSTEM #
+slurm_partition:        partition      # [REQUIRED] Name of the partition to use for SLURM job sumbission.
+slurm_account:          account        # [REQUIRED] Name of the account to use for SLURM job submission.
+slurm_email:            email          # [REQUIRED] Email address to use for SLURM job notifications.
+memory_per_core:        18.2e9         # [REQUIRED] Available memory per core on the system [GB].
+num_cores_per_node:     28             # [REQUIRED] Number of cores per node.
