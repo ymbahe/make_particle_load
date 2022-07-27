@@ -9,6 +9,13 @@ import subprocess
 from string import Template
 from shutil import copy
 
+template_dir = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    os.pardir,
+    'particle_load',
+    'templates'
+)
+
 # -------------------- Main public functions -------------------------------
 
 def make_all_param_files(params, codes):
@@ -47,7 +54,7 @@ def make_submit_file_for_icgen(params):
     create_dir_if_needed(icgen_work_dir)
 
     make_custom_copy(
-        './templates/ic_gen/submit', f"{icgen_work_dir}/submit.sh",
+        f"{template_dir}/ic_gen/submit", f"{icgen_work_dir}/submit.sh",
         params, executable=True
     )
     print("Generated submit file for IC-Gen.")
@@ -93,7 +100,7 @@ def make_param_file_for_icgen(params):
     params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1   
 
     make_custom_copy(
-        './templates/ic_gen/params.inp', f"{icgen_work_dir}/params.inp",
+        f"{template_dir}/ic_gen/params.inp", f"{icgen_work_dir}/params.inp",
         params
     )
 
@@ -107,8 +114,8 @@ def make_submit_file_for_swift(params):
     run_dir = f"{params['swift_run_dir']}"
     create_dir_if_needed(run_dir)
 
-    submit_template = f"./templates/swift/submit"
-    resub_template = f"./templates/swift/resubmit"
+    submit_template = f"{template_dir}/swift/submit"
+    resub_template = f"{template_dir}/swift/resubmit"
 
     if params['sim_type'] == 'eaglexl':
         params['swift_options'] = '--eagle'
@@ -152,26 +159,26 @@ def make_param_file_for_swift(params):
         #'%.8f'%(eps_baryon/h), '%.3f'%(softening_ratio_background),
         #'%.8f'%(eps_baryon_physical/h), '%.8f'%(eps_dm_physical/h), fname]
 
-        #subprocess.call("cp ./templates/swift/%s/select_output.yml %s"%\
+        #subprocess.call(f"cp {template_dir}/templates/swift/%s/select_output.yml %s"%\
         #        (template_set, data_dir), shell=True)
     elif sim_type == 'sibelius':
-        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
-        copy(f"./templates/swift/{sim_type}/stf_times_a.txt",
+        copy(f"{template_dir}/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"{template_dir}/swift/{sim_type}/stf_times_a.txt",
              f"{run_dir}/snapshot_times.txt")
 
     elif sim_type == 'eaglexl':
-        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
-        copy(f"./templates/swift/{sim_type}/output_times_a.txt",
+        copy(f"{template_dir}/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"{template_dir}/swift/{sim_type}/output_times_a.txt",
              f"{run_dir}/snapshot_times.txt")
 
     elif sim_type == 'colibre':
-        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
-        copy(f"./templates/swift/{sim_type}/output_times_a.txt",
+        copy(f"{template_dir}/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"{template_dir}/swift/{sim_type}/output_times_a.txt",
              f"{run_dir}/snapshot_times.txt")
 
     elif sim_type == 'dmo':
-        copy(f"./templates/swift/{sim_type}/select_output.yml", run_dir)
-        copy(f"./templates/swift/{sim_type}/output_times.txt",
+        copy(f"{template_dir}/swift/{sim_type}/select_output.yml", run_dir)
+        copy(f"{template_dir}/swift/{sim_type}/output_times.txt",
              f"{run_dir}/snapshot_times.txt")
 
         #split_mass = gas_particle_mass / 10**10. * 4.
@@ -184,7 +191,7 @@ def make_param_file_for_swift(params):
         set_trace()
         raise ValueError("Invalid template set")
 
-    make_custom_copy(f"./templates/swift/{sim_type}/params.yml",
+    make_custom_copy(f"{template_dir}/swift/{sim_type}/params.yml",
                      f"{run_dir}/params.yml", params)
     print("Generated parameter file for SWIFT.")
 
