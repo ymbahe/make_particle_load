@@ -83,12 +83,12 @@ def make_param_file_for_icgen_6p9(params):
 
     if params['icgen_num_constraints'] < 1:
         params['icgen_constraint_phase_descriptor'] = '%dummy'
-        params['icgen_constraint_phase_descriptor_path'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor_path'] = '%dummy'
         params['icgen_constraint_phase_descriptor_levels'] = '%dummy'
     if params['icgen_num_constraints'] < 2:
         params['icgen_constraint_phase_descriptor2'] = '%dummy'
-        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'   
-        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'
+        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'
 
     # Is this a zoom simulation? Then we cannot use 2LPT
     if params['is_zoom']:
@@ -97,11 +97,11 @@ def make_param_file_for_icgen_6p9(params):
     else:
         params['icgen_highres_l_mpchi'] = 0.0
         params['icgen_highres_n_eff'] = 0
-        params['icgen_2lpt_type'] = 1 
+        params['icgen_2lpt_type'] = 1
         params['icgen_is_multigrid'] = 0
 
     # Use Peano-Hilbert indexing?
-    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1   
+    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1
 
     make_custom_copy(
         f"{template_dir}/ic_gen/params.inp", f"{icgen_work_dir}/params.inp",
@@ -143,12 +143,12 @@ def make_param_file_for_icgen_8p4(params):
 
     if params['icgen_num_constraints'] < 1:
         params['icgen_constraint_phase_descriptor'] = '%dummy'
-        params['icgen_constraint_phase_descriptor_path'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor_path'] = '%dummy'
         params['icgen_constraint_phase_descriptor_levels'] = '%dummy'
     if params['icgen_num_constraints'] < 2:
         params['icgen_constraint_phase_descriptor2'] = '%dummy'
-        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'   
-        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'
+        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'
 
     # Is this a zoom simulation? Then we cannot use 2LPT
     if params['is_zoom']:
@@ -157,11 +157,11 @@ def make_param_file_for_icgen_8p4(params):
     else:
         params['icgen_highres_l_mpchi'] = 0.0
         params['icgen_highres_n_eff'] = 0
-        params['icgen_2lpt_type'] = 1 
+        params['icgen_2lpt_type'] = 1
         params['icgen_is_multigrid'] = 0
 
     # Use Peano-Hilbert indexing?
-    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1   
+    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1
 
     make_custom_copy(
         f"{template_dir}/ic_gen/params_8p4.inp", f"{icgen_work_dir}/params.inp",
