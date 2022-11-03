@@ -40,8 +40,8 @@ direct_primary_load:  1           # Switch to load entire snapshot (1), rather t
 
 # AMOEBA TOPOLOGY #
 topology_fill_holes:       True     # [Optional] Enable algorithm for filling holes (default: True).
-topology_dilation_n_iter:   1       # [Optional] Number of iterations of the algorithm for extrusion. Set to 0 (default) to disable.
-topology_closing_n_iter:    1       # [Optional] Number of iterations of the algorithm for rounding edges. Set value to 0 (default) to disable.
+topology_dilation_n_iter:   0       # [Optional] Number of iterations of the algorithm for extrusion. Set to 0 (default) to disable.
+topology_closing_n_iter:    0       # [Optional] Number of iterations of the algorithm for rounding edges. Set value to 0 (default) to disable.
 
 # SELECTION OF TARGET REGION BASED ON VR HALOES #
 select_from_vr:      True           # Switch to select automatic selection of target haloes from Velociraptor catalogue, based on following settings. If False, the position and extent of the target region must be specified manually below (`MANUAL GROUP SELECTION`).
