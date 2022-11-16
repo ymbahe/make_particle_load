@@ -13,6 +13,7 @@ fname:             my_run               # The save name for the mask file
 output_dir:        path/to/output/mask  # Directory to which the mask image and hdf5 file are saved
 snapshot_file:     path/to/parent/box   # The location of the snapshot we are creating the mask from
 snapshot_base:     path/to/parent/box   # Alternative to snapshot_file, with `$isnap` placeholder for snapshot index (only used if snapshot_file is not given).
+ics_file:          path/to/ics/file     # Separate file in which position-encoding ICs are stored. Only significant if `ids_encode_position` is False.
 primary_snapshot:  6                    # The primary snapshot index (only used if `snapshot_file` is not given).
 padding_snaps:     None                 # [Optional] Snapshots used for padding. Single snapshot if one number; continuous range if two numbers; continuous range with spacing if three. Default: None, no padding.
 
@@ -29,14 +30,16 @@ cell_size_mips:    3.0          # Cell size in units of mean inter-particle sepa
 dither_gap:        None         # [Optional] Dither shift applied to particles before checking for occupied cells, in units of mean inter-particle separation. Default: None, no dither applied.
 
 # TECHNICAL PARAMETERS
-base_cosmology:    Planck2018     # Name of cosmology used for parent simulation. Only used to calculate the mean inter-particle separation.
-ids_are_ph:        True           # Are the particle IDs in the snapshot representing Peano-Hilbert indices? If not, the `ics_file` must be specified, with IDs representing particle indices in that file.
-bits:              21             # The number of bits that were used in the particle IDs for the Peano-Hilbert indexing (EAGLE runs use 14).
-ved.
-data_type:         swift          # Type of snapshot to generate the mask from. Currently only `swift' is supported.
-divide_ids_by_two: False          # Switch to divide input particle IDs by 2. This is required if the IDs were multiplied by 2 during gas/DM splitting (as in EAGLE), but generally not for DM-only parent runs.
+base_cosmology:      Planck2018     # Name of cosmology used for parent simulation. Only used to calculate the mean inter-particle separation.
+ids_encode_position: True           # [Optional] Do the particle IDs in the snapshot(s) directly encode their Lagrangian coordinates? If not, the `ics_file` must be specified, with IDs representing particle indices in that file.
+ids_type:            Peano          # Method used to encode Lagrangian coordinates in particle IDs: `Peano` (Peano-Hilbert index) or `Lattice` (sequential lattice indexing as in monofonIC).
+bits:                21             # The number of bits that were used in the particle IDs for the Peano-Hilbert indexing (EAGLE runs use 14). Only significant if `ids_type` is `Peano`.
+parent_npart:        512            # The number of particles per dimension in the parent simulation. Only significant if `ids_type` = Lattice.
+orig_id_name:        PeanoHilbertIDs # [Optional] The name of the data set in `ics_file` that contains the position-encoding particle IDs. Only significant if `ids_encode_position` is False.
+data_type:           swift          # Type of snapshot to generate the mask from. Currently only `swift' is supported.
+divide_ids_by_two:   False          # Switch to divide input particle IDs by 2. This is required if the IDs were multiplied by 2 during gas/DM splitting (as in EAGLE), but generally not for DM-only parent runs.
 highres_diffusion_buffer:  60.0   # Radius of shell around the target region in which to load particles in primary snapshot. Only used if direct_primary_load is 0.
-direct_primary_load:  1           # Switch to load entire snapshot (1), rather than only a subset based on top-level cells (0).
+direct_primary_load: 1           # Switch to load entire snapshot (1), rather than only a subset based on top-level cells (0).
 
 # AMOEBA TOPOLOGY #
 topology_fill_holes:       True     # [Optional] Enable algorithm for filling holes (default: True).

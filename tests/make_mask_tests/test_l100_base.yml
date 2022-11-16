@@ -29,7 +29,8 @@ dither_gap:        None         # [Optional] Dither shift applied to particles b
 
 # TECHNICAL PARAMETERS
 base_cosmology:    Planck2018     # Name of cosmology used for parent simulation. Only used to calculate the mean inter-particle separation.
-ids_are_ph:        True           # Are the particle IDs in the snapshot representing Peano-Hilbert indices? If not, the `ics_file` must be specified, with IDs representing particle indices in that file.
+ids_encode_position:        True
+ids_type:          Peano
 bits:              21             # The number of bits that were used in the particle IDs for the Peano-Hilbert indexing (EAGLE runs use 14).
 data_type:         swift          # Type of snapshot to generate the mask from. Currently only `swift' is supported.
 divide_ids_by_two: False          # Switch to divide input particle IDs by 2. This is required if the IDs were multiplied by 2 during gas/DM splitting (as in EAGLE), but generally not for DM-only parent runs.

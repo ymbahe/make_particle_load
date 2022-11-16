@@ -187,7 +187,7 @@ class MakeMask:
             self.params['topology_fill_holes'] = True
             self.params['topology_dilation_niter'] = 0
             self.params['topology_closing_niter'] = 0
-            self.params['phid_name'] = 'PeanoHilbertIDs'
+            self.params['orig_id_name'] = 'PeanoHilbertIDs'
             self.params['padding_snaps'] = None
             self.params['highres_padding_width'] = 0
             self.params['highres_diffusion_buffer'] = 50.0
@@ -206,8 +206,6 @@ class MakeMask:
             # is raised if they are not found in the YAML file.
             required_params = [
                 'fname',
-                'ids_are_ph',
-                'bits',
                 'data_type',
                 'divide_ids_by_two',
                 'select_from_vr',
@@ -531,7 +529,7 @@ class MakeMask:
         # Find initial (Lagrangian) positions of particles from their IDs
         # (recall that these are really Peano-Hilbert indices).
         # Coordinates are in the same units as the box size.
-        self.lagrangian_coords = self.compute_ic_positions(ids)
+        self.lagrangian_coords = self.compute_lagrangian_coordinates(ids)
         self.ids = ids
         
         # If desired, identify additional padding particles in other snapshots.
@@ -917,36 +915,52 @@ class MakeMask:
 
         """
         pass
-        
-    def compute_ic_positions(self, ids) -> np.ndarray:
-        """
-        Compute the particle positions in the ICs.
 
-        This exploits the fact that the particle IDs are set to Peano-Hilbert
-        keys that encode the positions in the ICs.
+    def compute_lagrangian_coordinates(self, ids) -> np.ndarray:
+        """Compute the Lagrangian particle coordinates from their IDs.
+
+        The coordinates can be encoded either as Peano-Hilbert index,
+        or in simple sequential form as used in monofonIC. The behaviour
+        depends on the value of `self.params['ids_type']`. It is also possible
+        to use IDs that are indices into a position-encoding number.
 
         Parameters
         ----------
         ids : ndarray(int)
             The Particle IDs for which to calculate IC coordinates. If they
-            are not Peano-Hilbert indices themselves, these are retrieved
-            fro the ICs file.
+            are not coordinate-encoding themselves, they are translated
+            via the specified ICs file `self.params['ics_file']`.
 
         Returns
         -------
         coords : ndarray(float)
             The coordinates of particles in the ICs [Mpc].
+
         """
         print(f"[Rank {comm_rank}] Computing initial positions of dark matter "
               "particles...")
 
-        if not self.params['ids_are_ph']:
-            print("Translating particle IDs to PH IDs...", end='', flush=True)
+        # First resolve possible non-encoding IDs
+        if not self.params['ids_encode_position']:
+            print("Translating particle IDs to position-encoding ones...",
+                  end='', flush=True)
             with h5py.File(self.params['ics_file'], 'r') as f:
-                ics_ph_ids = f[f"PartType1/{self.params['phid_name']}"][...]
+                ics_ph_ids = f[f"PartType1/{self.params['orig_id_name']}"][...]
                 ids = ics_ph_ids[ids-1]
 
             print(" done.")
+
+        # Now translate the IDs to positions. This differs between
+        # Peano-Hilbert and lattice encoding forms.
+        if self.params['ids_type'].lower() == 'peano':
+            return self._compute_lagrangian_coordinates_peano(ids)
+        elif self.params['ids_type'].lower() == 'lattice':
+            return self._compute_lagrangian_coordinates_lattice(ids)
+        else:
+            raise ValueError(f'Invalid ID type "{self.params[ids_type]}"!')
+
+    def _compute_lagrangian_coordinates_peano(self, ids) -> np.ndarray:
+        """Translate Peano-Hilbert IDs into Lagrangian coordinates."""
 
         # First, convert the (scalar) PH key for each particle back to a triple
         # of indices giving its (quantised, normalized) offset from the origin
@@ -962,7 +976,7 @@ class MakeMask:
             raise ValueError(
                 f"Inconsistent range of quantized IC coordinates: {ic_min} - "
                 f"{ic_max} (allowed: 0 - {2**self.params['bits']})"
-                )
+            )
 
         # Re-scale quantized coordinates to floating-point distances between
         # origin and centre of corresponding grid cell
@@ -970,6 +984,21 @@ class MakeMask:
         ic_coords = (ic_coords.astype('float') + 0.5) * cell_size
 
         return ic_coords.astype('f8')
+
+    def _compute_lagrangian_coordinates_lattice(self, ids) -> np.ndarray:
+        """Translate Lattice IDs into Lagrangian coordinates."""
+
+        ngrid = self.params['parent_npart']
+        lbox = self.params['box_size']
+        z = ids % ngrid
+        y = ((ids - z) / ngrid) % ngrid
+        x = ((ids - z) / ngrid - y) / ngrid
+
+        # Re-scale coordinates from [0, ngrid] --> [0, lbox]
+        coords = np.vstack((x, y, z)).T
+        coords *= lbox / ngrid
+
+        return coords.astype('f8')
 
     def compute_bounding_box(
         self, inds, serial_only=False, with_wrapping=True):
