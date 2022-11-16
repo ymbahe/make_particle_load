@@ -43,7 +43,7 @@
  0                              ! For Resim ics only:  1: output linear density; 0 nothing
 --------------------------------------------------------------------------------------------
  0                             ! 0 - Import file
-'./particle_load_fbinary/PL'   ! (Imported) Part load basename
+'./particle_load/fbinary/PL'   ! (Imported) Part load basename
  1                             ! Part load Rep factor
 './ICs/$sim_name'              ! output file base name
 ------------------------------------------------------------------------------
