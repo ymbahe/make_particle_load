@@ -45,7 +45,7 @@ gcube_min_size_mpc:         0.0       # Minimum size of the gcube in Mpc (defaul
 # HIGH-LEVEL OPTIONS FOR SETTING UP SUBSEQUENT CODES #
 generate_param_files:   True           # Auto-generate parameter files (default: True)?
 generate_submit_files:  True           # Auto-generate submit files (default: True)?
-code_types:             IC_Gen         # Codes to generate files for (Default and only option: IC_Gen)
+code_types:             IC_Gen_6p9     # Codes to generate files for (IC_Gen_6p9 [default] or IC_Gen_8p4)
 z_initial:              127.0          # [REQUIRED] Redshift to generate ICs at (only needed if param or submit files are to be generated).
 
 # OPTIONS FOR SETTING UP IC_GEN #
@@ -66,6 +66,7 @@ fft_n_min:                1536        # Minimum FFT grid size, irrespective of p
 icgen_multigrid:          True        # For zoom ICs, should IC_Gen use multi-grid FFT? Default: True.
 icgen_runtime_hours:      4           # Runtime in hours to request for IC_Gen job (default: 4).
 icgen_num_constraints:    0           # Number of phase constraints for constrained realisation ICs (default: 0, unconstrained).
+icgen_p6_multipoles:      6.0         # Determine which multipoles to use for Panph6 descriptors only (default: 6.0).
 icgen_constraint_phase_descriptor:   '%dummy'   # Phase descriptor string for constrained-realisation ICs (only meaningful if icgen_num_constraints > 0).
 icgen_constraint_phase_descriptor_levels: '%dummy' # Constraint phase descriptor levels (only meaningful if icgen_num_constraints > 0).
 icgen_constraint_phase_descriptor_path: '%dummy' # Constraint phase descriptor path (only meaningful if icgen_num_constraints > 0).

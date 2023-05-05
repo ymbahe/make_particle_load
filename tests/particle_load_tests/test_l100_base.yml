@@ -42,7 +42,7 @@ gcube_min_size_mpc:         0.0       # Minimum size of the gcube in Mpc (defaul
 # HIGH-LEVEL OPTIONS FOR SETTING UP SUBSEQUENT CODES #
 generate_param_files:   True           # Auto-generate parameter files (default: True)?
 generate_submit_files:  True           # Auto-generate submit files (default: True)?
-code_types:             IC_Gen         # Codes to generate files for (Default and only option: IC_Gen)
+code_types:             IC_Gen_6p9     # Codes to generate files for (Default and only option: IC_Gen)
 z_initial:              127.0          # [REQUIRED] Redshift to generate ICs at (only needed if param or submit files are to be generated).
 
 # OPTIONS FOR SETTING UP IC_GEN #

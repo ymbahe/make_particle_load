@@ -330,7 +330,7 @@ class ParticleLoad:
             # Basic switches
             'generate_param_files': True,
             'generate_submit_files': True,
-            'code_types': 'IC_Gen, SWIFT',
+            'code_types': 'IC_Gen_6p9',
             
             # General simulation options
             'z_initial': None,
@@ -356,6 +356,7 @@ class ParticleLoad:
             'icgen_multigrid': True,
             'panphasian_descriptor': None,
             'icgen_num_constraints': 0,
+            'icgen_p6_multipoles': 6.0,
             'icgen_constraint_phase_descriptor': '%dummy',
             'icgen_constraint_phase_descriptor2': '%dummy',
             'icgen_constraint_phase_descriptor_levels': '%dummy',
@@ -2842,6 +2843,8 @@ class ParticleLoad:
         param_dict['slurm_account'] = extra_params['slurm_account']
         param_dict['slurm_email'] = extra_params['slurm_email']
         param_dict['num_cores_per_node'] = extra_params['num_cores_per_node']
+
+        param_dict['icgen_p6_multipoles'] = extra_params['icgen_p6_multipoles']
 
         return param_dict       
 

@@ -20,8 +20,10 @@ template_dir = os.path.join(
 
 def make_all_param_files(params, codes):
     """Wrapper to generate all required param files."""
-    if 'ic_gen' in codes:
-        make_param_file_for_icgen(params)
+    if 'ic_gen_6p9' in codes:
+        make_param_file_for_icgen_6p9(params)
+    if 'ic_gen_8p4' in codes:
+        make_param_file_for_icgen_8p4(params)
     if 'swift' in codes:
         make_param_file_for_swift(params)
     if 'gadget3' in codes:
@@ -32,8 +34,10 @@ def make_all_param_files(params, codes):
 
 def make_all_submit_files(params, codes):
     """Wrapper to generate all required submit files."""
-    if 'ic_gen' in codes:
-        make_submit_file_for_icgen(params)
+    if 'ic_gen_6p9' in codes:
+        make_submit_file_for_icgen_6p9(params)
+    if 'ic_gen_8p4' in codes:
+        make_submit_file_for_icgen_8p4(params)
     if 'swift' in codes:
         make_submit_file_for_swift(params)
     if 'gadget3' in codes:
@@ -44,9 +48,9 @@ def make_all_submit_files(params, codes):
 
 # ---------------- Functions for individual target codes ---------------------
 
-# .............................. IC-GEN ......................................
+# .............................. IC-GEN 6.9/8.4 ...............................
 
-def make_submit_file_for_icgen(params):
+def make_submit_file_for_icgen_6p9(params):
     """Make slurm submission script for IC-Gen."""
 
     # Make folder if it doesn't exist.
@@ -57,9 +61,9 @@ def make_submit_file_for_icgen(params):
         f"{template_dir}/ic_gen/submit", f"{icgen_work_dir}/submit.sh",
         params, executable=True
     )
-    print("Generated submit file for IC-Gen.")
+    print("Generated submit file for IC-Gen 6.9.")
 
-def make_param_file_for_icgen(params):
+def make_param_file_for_icgen_6p9(params):
     """Make a parameter file for IC-Gen."""
 
     icgen_work_dir = f"{params['icgen_work_dir']}"
@@ -79,12 +83,12 @@ def make_param_file_for_icgen(params):
 
     if params['icgen_num_constraints'] < 1:
         params['icgen_constraint_phase_descriptor'] = '%dummy'
-        params['icgen_constraint_phase_descriptor_path'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor_path'] = '%dummy'
         params['icgen_constraint_phase_descriptor_levels'] = '%dummy'
     if params['icgen_num_constraints'] < 2:
         params['icgen_constraint_phase_descriptor2'] = '%dummy'
-        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'   
-        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'   
+        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'
+        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'
 
     # Is this a zoom simulation? Then we cannot use 2LPT
     if params['is_zoom']:
@@ -93,18 +97,78 @@ def make_param_file_for_icgen(params):
     else:
         params['icgen_highres_l_mpchi'] = 0.0
         params['icgen_highres_n_eff'] = 0
-        params['icgen_2lpt_type'] = 1 
+        params['icgen_2lpt_type'] = 1
         params['icgen_is_multigrid'] = 0
 
     # Use Peano-Hilbert indexing?
-    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1   
+    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1
 
     make_custom_copy(
         f"{template_dir}/ic_gen/params.inp", f"{icgen_work_dir}/params.inp",
         params
     )
 
-    print("Generated parameter file for IC-Gen.")
+    print("Generated parameter file for IC-Gen 6.9.")
+
+def make_submit_file_for_icgen_8p4(params):
+    """Make slurm submission script for IC-Gen."""
+
+    # Make folder if it doesn't exist.
+    icgen_work_dir = f"{params['icgen_work_dir']}"
+    create_dir_if_needed(icgen_work_dir)
+
+    make_custom_copy(
+        f"{template_dir}/ic_gen/submit", f"{icgen_work_dir}/submit.sh",
+        params, executable=True
+    )
+    print("Generated submit file for IC-Gen 8.4.")
+
+def make_param_file_for_icgen_8p4(params):
+    """Make a parameter file for IC-Gen."""
+
+    icgen_work_dir = f"{params['icgen_work_dir']}"
+
+    # Make output folder for the ICs (should already be done in main code!)
+    icgen_output_dir = f"{icgen_work_dir}/ICs/"
+    create_dir_if_needed(icgen_output_dir)
+
+    # What are the constraint phase descriptors?
+    if params['icgen_constraint_phase_descriptor'] != '%dummy':
+        if params['icgen_constraint_phase_descriptor2'] != '%dummy':
+            params['icgen_is_constraint'] = 2
+        else:
+            params['icgen_is_constraint'] = 1
+    else:
+        params['icgen_is_constraint'] = 0
+
+    if params['icgen_num_constraints'] < 1:
+        params['icgen_constraint_phase_descriptor'] = '%dummy'
+        params['icgen_constraint_phase_descriptor_path'] = '%dummy'
+        params['icgen_constraint_phase_descriptor_levels'] = '%dummy'
+    if params['icgen_num_constraints'] < 2:
+        params['icgen_constraint_phase_descriptor2'] = '%dummy'
+        params['icgen_constraint_phase_descriptor2_path'] = '%dummy'
+        params['icgen_constraint_phase_descriptor2_levels'] = '%dummy'
+
+    # Is this a zoom simulation? Then we cannot use 2LPT
+    if params['is_zoom']:
+        params['icgen_2lpt_type'] = 0 if params['icgen_multigrid'] else 1
+        params['icgen_is_multigrid'] = 1 if params['icgen_multigrid'] else 0
+    else:
+        params['icgen_highres_l_mpchi'] = 0.0
+        params['icgen_highres_n_eff'] = 0
+        params['icgen_2lpt_type'] = 1
+        params['icgen_is_multigrid'] = 0
+
+    # Use Peano-Hilbert indexing?
+    params['icgen_indexing'] = 2 if params['icgen_use_PH_ids'] else 1
+
+    make_custom_copy(
+        f"{template_dir}/ic_gen/params_8p4.inp", f"{icgen_work_dir}/params.inp",
+        params
+    )
+
+    print("Generated parameter file for IC-Gen 8.4.")
 
 # .............................. SWIFT ......................................
 
