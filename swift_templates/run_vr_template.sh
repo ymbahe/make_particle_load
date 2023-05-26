@@ -1,17 +1,18 @@
 #!/bin/bash
 
-#SBATCH --ntasks 48 # The number of cores you need...
+#SBATCH --ntasks 24 # The number of cores you need...
 #SBATCH -J VR_${sim_name}_XXX-SNAP-STRING-XXX #Give it something meaningful.
 #SBATCH --mem=${slurm_memory}
 #SBATCH -o logs/vr.%J.out
 #SBATCH -e logs/vr.%J.err
-#SBATCH -p altair
+#SBATCH -p cosma7
+#SBATCH -A dp004
 #SBATCH --exclusive
 #SBATCH -t $vr_time_string
 #SBATCH --mail-type=ALL # notifications for job done & fail
 #SBATCH --mail-user=bahe@strw.leidenuniv.nl #PLEASE PUT YOUR EMAIL ADDRESS HERE (without the <>)
 
-source ~/.module_load_swift_altair
+source ~/.module_load_vr_phdf5
 
 # Run the program
 
