@@ -1,0 +1,365 @@
+---
+
+# SWIFT used parameter file
+# Code version: 0.9.0
+# git revision: v0.9.0-1289-g5ffc569f-dirty
+# git branch: temperature_bug_tracking
+# git date: 2021-12-02 23:12:03 +0100
+
+MetaData:
+  run_name: SWIFT-FLAMINGO_Simulation
+
+InternalUnitSystem:
+  UnitMass_in_cgs: 1.98841e43
+  UnitLength_in_cgs: 3.08567758e24
+  UnitVelocity_in_cgs: 1e5
+  UnitCurrent_in_cgs: 1
+  UnitTemp_in_cgs: 1
+
+Cosmology:
+  h: 0.681
+  a_begin: 0.03125
+  a_end: 1.0
+  Omega_cdm: 0.256011
+  Omega_lambda: 0.693922
+  Omega_b: 0.048600
+  T_nu_0: 1.9517578050
+  N_ur: 2.0308
+  N_nu: 1
+  M_nu_eV: 0.06
+  deg_nu: 1.0
+  Omega_m: -1
+  Omega_r: 0
+  w_0: -1
+  w_a: 0
+
+TimeIntegration:
+  dt_min: 1e-10
+  dt_max: 1e-2
+  max_dt_RMS_factor: 0.25
+  dt_RMS_use_gas_only: 0
+
+Snapshots:
+  basename: flamingo
+  output_list_on: 1
+  output_list: ./output_list.txt
+  select_output_on: 0
+  select_output: ./select_output.yml
+  compression: 4
+  distributed: 1
+  use_delta_from_edge: 1
+  delta_from_edge: 1e-5
+  invoke_fof: 1
+  lustre_OST_count: 0
+  scale_factor_first: 0.1
+  time_first: 0
+  delta_time: -1
+  subdir: .
+  run_on_dump: 0
+  invoke_stf: 0
+  invoke_ps: 0
+  UnitMass_in_cgs: 1.98841e+43
+  UnitLength_in_cgs: 3.08568e+24
+  UnitVelocity_in_cgs: 100000
+  UnitCurrent_in_cgs: 1
+  UnitTemp_in_cgs: 1
+
+Statistics:
+  delta_time: 1.01
+  scale_factor_first: 0.03126
+  time_first: 0
+  energy_file_name: statistics
+  timestep_file_name: timesteps
+  output_list_on: 0
+
+Restarts:
+  onexit: 1
+  stop_steps: 25
+  delta_hours: 4.0
+  max_run_time: 71.5
+  resubmit_on_exit: 1
+  resubmit_command: ./resub.sh
+  lustre_OST_count: 0
+  subdir: restart
+  basename: swift
+  enable: 1
+  save: 1
+
+Gravity:
+  eta: 0.025
+  MAC: adaptive
+  theta_cr: 0.7
+  epsilon_fmm: 0.001
+  use_tree_below_softening: 0
+  mesh_side_length: 512
+  distributed_mesh: 0
+  comoving_DM_softening: 0.0223
+  max_physical_DM_softening: 0.0057
+  comoving_baryon_softening: 0.0223
+  max_physical_baryon_softening: 0.0057
+  comoving_nu_softening: 0.0223
+  max_physical_nu_softening: 0.0057
+  rebuild_frequency: 0.01
+  a_smooth: 1.25
+  r_cut_max: 4.5
+  r_cut_min: 0.1
+  allow_truncation_in_MAC: 0
+
+SPH:
+  resolution_eta: 1.2348
+  h_min_ratio: 0.01
+  h_max: 3.0
+  CFL_condition: 0.2
+  minimal_temperature: 100.0
+  initial_temperature: 268.7
+  particle_splitting: 1
+  particle_splitting_mass_threshold: 0.4
+  h_tolerance: 0.0001
+  max_ghost_iterations: 30
+  use_mass_weighted_num_ngb: 0
+  max_volume_change: 1.4
+  H_ionization_temperature: 10000
+  H_mass_fraction: 0.752
+  viscosity_alpha: 0.1
+  viscosity_alpha_max: 2
+  viscosity_alpha_min: 0
+  viscosity_length: 0.05
+  diffusion_alpha: 0
+  diffusion_beta: 1
+  diffusion_alpha_max: 1
+  diffusion_alpha_min: 0
+  particle_splitting_generate_random_ids: 0
+
+Stars:
+  resolution_eta: 1.1642
+  h_tolerance: 7e-3
+  luminosity_filename: /cosma8/data/dp004/jlvc76/FLAMINGO/ScienceRuns/Tables/photometry
+  timestep_age_threshold_unlimited_Myr: 45.1
+  timestep_age_threshold_Myr: 45.
+  max_timestep_young_Myr: 1.
+  max_ghost_iterations: 30
+  max_volume_change: -1
+  overwrite_birth_time: 0
+  overwrite_birth_density: 0
+  overwrite_birth_temperature: 0
+  max_timestep_old_Myr: 3.40282e+38
+
+FOF:
+  basename: fof/fof_output
+  min_group_size: 32
+  linking_length_ratio: 0.2
+  seed_black_holes_enabled: 1
+  black_hole_seed_halo_mass_Msun: 2.757e11
+  scale_factor_first: 0.05
+  delta_time: 1.00751
+  group_id_default: 2147483647
+  group_id_offset: 1
+  absolute_linking_length: -1
+  dump_catalogue_when_seeding: 0
+  time_first: 0
+
+Scheduler:
+  max_top_level_cells: 64
+  cell_split_size: 400
+  engine_max_parts_per_cooling: 1000
+  cell_subdepth_diff_grav: 4
+  tasks_per_cell: 4
+  cell_max_size: 8000000
+  cell_sub_size_pair_hydro: 256000000
+  cell_sub_size_self_hydro: 32000
+  cell_sub_size_pair_stars: 256000000
+  cell_sub_size_self_stars: 32000
+  cell_sub_size_pair_grav: 256000000
+  cell_sub_size_self_grav: 32000
+  cell_extra_parts: 0
+  cell_extra_sparts: 100
+  cell_extra_gparts: 0
+  cell_extra_bparts: 0
+  cell_extra_sinks: 0
+  engine_max_parts_per_ghost: 1000
+  engine_max_sparts_per_ghost: 1000
+  nr_queues: 32
+  dependency_graph_frequency: 0
+  task_level_output_frequency: 0
+  links_per_tasks: 25
+  mpi_message_limit: 4
+
+DomainDecomposition:
+  trigger: 0.1
+  initial_type: edgememory
+  repartition_type: fullcosts
+  minfrac: 0.95
+  usemetis: 0
+  adaptive: 1
+  itr: 100
+  use_fixed_costs: 0
+  synchronous: 0
+
+InitialConditions:
+  file_name: /cosma8/data/dp004/dc-elbe1/FLAMINGO/ICs/DES3_M060_L2800_N5040/FLAMINGO_DES3_M060_L2800_N5040.hdf5
+  periodic: 1
+  cleanup_h_factors: 0
+  cleanup_velocity_factors: 0
+  generate_gas_in_ics: 0
+  cleanup_smoothing_lengths: 0
+  remap_ids: 0
+  replicate: 1
+  metadata_group_name: ICs_parameters
+  smoothing_length_scaling: 1
+  stars_smoothing_length: -1
+  black_holes_smoothing_length: -1
+
+EAGLEChemistry:
+  init_abundance_metal: 0.
+  init_abundance_Hydrogen: 0.752
+  init_abundance_Helium: 0.248
+  init_abundance_Carbon: 0.0
+  init_abundance_Nitrogen: 0.0
+  init_abundance_Oxygen: 0.0
+  init_abundance_Neon: 0.0
+  init_abundance_Magnesium: 0.0
+  init_abundance_Silicon: 0.0
+  init_abundance_Iron: 0.0
+
+COLIBRECooling:
+  dir_name: /cosma8/data/dp004/jlvc76/FLAMINGO/ScienceRuns/Tables/UV_dust1_CR1_G1_shield1.hdf5
+  H_reion_z: 7.5
+  H_reion_eV_p_H: 2.0
+  He_reion_z_centre: 3.5
+  He_reion_z_sigma: 0.5
+  He_reion_eV_p_H: 2.0
+  delta_logTEOS_subgrid_properties: 0.3
+  rapid_cooling_threshold: 0.333333
+  Ca_over_Si_in_solar: 1
+  S_over_Si_in_solar: 1
+
+EAGLEStarFormation:
+  SF_threshold: Zdep
+  SF_model: PressureLaw
+  KS_normalisation: 1.515e-4
+  KS_exponent: 1.4
+  min_over_density: 100.0
+  KS_high_density_threshold_H_p_cm3: 1e8
+  KS_high_density_exponent: 2.0
+  EOS_entropy_margin_dex: 0.3
+  threshold_norm_H_p_cm3: 0.1
+  threshold_Z0: 0.002
+  threshold_slope: 0.0
+  threshold_max_density_H_p_cm3: 10.0
+  gas_fraction: 1
+  density_direct_H_p_cm3: 3.40282e+38
+
+EAGLEEntropyFloor:
+  Jeans_density_threshold_H_p_cm3: 1e-4
+  Jeans_over_density_threshold: 10.
+  Jeans_temperature_norm_K: 800
+  Jeans_gamma_effective: 1.3333333
+  Cool_density_threshold_H_p_cm3: 1e-5
+  Cool_over_density_threshold: 10.
+  Cool_temperature_norm_K: 10.
+  Cool_gamma_effective: 1.
+
+EAGLEFeedback:
+  use_SNII_feedback: 1
+  use_SNIa_feedback: 1
+  use_AGB_enrichment: 1
+  use_SNII_enrichment: 1
+  use_SNIa_enrichment: 1
+  filename: /cosma8/data/dp004/jlvc76/FLAMINGO/ScienceRuns/Tables/yieldtables/
+  IMF_min_mass_Msun: 0.1
+  IMF_max_mass_Msun: 100.0
+  SNII_min_mass_Msun: 8.0
+  SNII_max_mass_Msun: 100.0
+  SNII_sampled_delay: 1
+  SNII_energy_erg: 1.0e51
+  SNII_delta_v_pivot_km_p_s: 561.807095573
+  SNII_delta_v_min_km_p_s: 561.807095573
+  SNII_delta_v_max_km_p_s: 561.807095573
+  SNII_delta_v_n_0_H_p_cm3: 0.1
+  SNII_delta_v_slope: 0.33333
+  SNII_energy_fraction_min: 0.23829533
+  SNII_energy_fraction_max: 0.23829533
+  SNII_energy_fraction_function: EAGLE
+  SNII_energy_fraction_Z_0: 0.0012663729
+  SNII_energy_fraction_n_0_H_p_cm3: 1.4588
+  SNII_energy_fraction_n_Z: 0.8686
+  SNII_energy_fraction_n_n: 0.8686
+  SNII_energy_fraction_use_birth_density: 0
+  SNII_energy_fraction_use_birth_metallicity: 0
+  SNIa_DTD: Exponential
+  SNIa_DTD_delay_Gyr: 0.04
+  SNIa_DTD_exp_timescale_Gyr: 2.0
+  SNIa_DTD_exp_norm_p_Msun: 0.002
+  SNIa_energy_erg: 1.0e51
+  AGB_ejecta_velocity_km_p_s: 10.0
+  stellar_evolution_age_cut_Gyr: 0.1
+  stellar_evolution_sampling_rate: 10
+  SNII_yield_factor_Hydrogen: 1.0
+  SNII_yield_factor_Helium: 1.0
+  SNII_yield_factor_Carbon: 0.5
+  SNII_yield_factor_Nitrogen: 1.0
+  SNII_yield_factor_Oxygen: 1.0
+  SNII_yield_factor_Neon: 1.0
+  SNII_yield_factor_Magnesium: 2.0
+  SNII_yield_factor_Silicon: 1.0
+  SNII_yield_factor_Iron: 0.5
+
+EAGLEAGN:
+  subgrid_seed_mass_Msun: 1.0e5
+  use_multi_phase_bondi: 0
+  use_subgrid_bondi: 0
+  with_angmom_limiter: 0
+  with_fixed_T_near_EoS: 0
+  with_boost_factor: 1
+  boost_beta: 0.5143727
+  boost_n_h_star_H_p_cm3: 0.1
+  radiative_efficiency: 0.1
+  coupling_efficiency: 0.15
+  max_eddington_fraction: 1.
+  eddington_fraction_for_recording: 0.1
+  use_nibbling: 1
+  min_gas_mass_for_nibbling: 5.35e8
+  AGN_feedback_model: MinimumDistance
+  AGN_use_deterministic_feedback: 1
+  AGN_num_ngb_to_heat: 1.0
+  use_variable_delta_T: 0
+  AGN_delta_T_K: 8.80144197177e7
+  AGN_use_adaptive_energy_reservoir_threshold: 0
+  max_reposition_mass: 1e20
+  max_reposition_distance_ratio: 3.0
+  with_reposition_velocity_threshold: 0
+  set_reposition_speed: 0
+  threshold_major_merger: 0.333
+  threshold_minor_merger: 0.1
+  merger_threshold_type: 2
+  merger_max_distance_ratio: 3.0
+  minimum_timestep_Myr: 0.1
+  use_subgrid_mass_from_ics: 1
+  with_subgrid_mass_check: 1
+
+Neutrino:
+  use_delta_f: 0
+  generate_ics: 0
+  use_delta_f_mesh_only: 1
+  use_model_none: 0
+  neutrino_seed: 0
+  use_linear_response: 0
+
+XrayEmissivity:
+  xray_table_path: /cosma8/data/dp004/jlvc76/FLAMINGO/ScienceRuns/Tables/X_Ray_tables.hdf5
+
+PhysicalConstants:
+  G: 43.0092
+
+BlackHoles:
+  resolution_eta: 1.2348
+  h_tolerance: 0.0001
+  max_ghost_iterations: 30
+  max_volume_change: -1
+
+StructureFinding:
+  output_list_on: 0
+
+LineOfSight:
+  output_list_on: 0
+...
