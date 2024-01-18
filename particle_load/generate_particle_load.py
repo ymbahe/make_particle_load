@@ -1414,7 +1414,7 @@ class ParticleLoad:
         if np.min(gcell_info['num_cells'] < 0):
             raise ValueError(f"Negative entries in gcell_info['num_cells']...")
         num_gcells_processed = comm.reduce(np.sum(gcell_info['num_cells']))
-        if comm_rank == 0 and num_gcells_processed != gcell_types.shape[0]:
+        if comm_rank == 0 and num_gcells_processed != self.gcube['num_cells']:
             raise ValueError(
                 f"Processed {num_gcells_processed} gcells, but there are "
                 f"{self.gcube['num_cells']}!"
