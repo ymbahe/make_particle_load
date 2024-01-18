@@ -613,11 +613,11 @@ class ParticleLoad:
         else:
             mask_data = None
             centre = None
-	    self.sim_box = None
+            self.sim_box = None
 
         mask_data = comm.bcast(mask_data)
         centre = comm.bcast(centre)
-	self.sim_box = comm.bcast(self.sim_box)
+        self.sim_box = comm.bcast(self.sim_box)
 
         if comm_rank == 0:
             centre_mpc = centre * lbox_mpc 
