@@ -274,7 +274,7 @@ def set_up_rundir(args, params):
     if not os.path.isdir(run_dir):
         os.makedirs(run_dir)
 
-    if args.vrx is not None and not os.path.isdir(run_dir + '/logs'):
+    if args.vrx is not None and not os.path.isdir(run_dir + '/vr'):
         os.makedirs(run_dir + '/vr')
         
     copy(args.output_time_file, f"{run_dir}/output_times.dat")
@@ -438,7 +438,7 @@ def generate_postprocessing_scripts(data, args):
             'slurm_memory': data['slurm_memory'],
         }
         make_custom_copy(args.run_vr_template, vr_template_file, param_dict) 
-        copy(args.postprocess_file, args.run_dir/postprocess.sh)
+        copy(args.postprocess_file, args.run_dir + '/postprocess.sh')
         copy(args.vrx + '/stf', args.run_dir)
     
 def compute_top_level_cells(data):
