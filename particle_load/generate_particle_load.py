@@ -363,7 +363,6 @@ class ParticleLoad:
             'icgen_constraint_phase_descriptor2_levels': '%dummy',
             'icgen_constraint_phase_descriptor_path': '%dummy',
             'icgen_constraint_phase_descriptor2_path': '%dummy',
-            'icgen_powspec_dir': '../..',
 
             # System-specific parameters
             'slurm_partition': local['slurm_partition'],
@@ -2821,7 +2820,7 @@ class ParticleLoad:
         param_dict['icgen_cut_t1t2'] = cut_type1_type2
         param_dict['icgen_cut_t2t3'] = cut_type2_type3
         param_dict['icgen_linear_powspec_file'] = (
-            f"{extra_params['icgen_powspec_dir']}/"
+            f"{extra_params['icgen_powerspec_dir']}/"
             f"{self.cosmo['linear_powerspectrum_file']}"
         )
         param_dict['icgen_panphasian_descriptor'] = (
