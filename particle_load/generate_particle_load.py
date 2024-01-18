@@ -129,7 +129,7 @@ class ParticleLoad:
         self.sim_box = self.initialize_sim_box()
         self.mask_data, self.centre = self.load_mask_file()
 
-        if comm_rank:
+        if comm_rank == 0:
             print("Computing simulation and (target) particle masses...")
         self.compute_box_mass()
         self.get_target_resolution()
