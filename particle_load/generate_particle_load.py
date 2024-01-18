@@ -1507,7 +1507,7 @@ class ParticleLoad:
         # Find the particle number per dimension that would fill the gcube
         # at the highest and lowest resolutions
         lowest_gcell_load = comm.allreduce(gcell_load_range[0], op=MPI.MIN)
-        highest_gcell_load = comm.reduce(gcell_load_range[1], op=MPI.MAX)
+        highest_gcell_load = comm.allreduce(gcell_load_range[1], op=MPI.MAX)
         num_part_equiv_low = lowest_gcell_load * gcube['num_cells']
         num_part_equiv_high = highest_gcell_load * gcube['num_cells']
 
