@@ -115,9 +115,10 @@ class ParticleLoad:
 
         self.verbose = 1
 
-        print("----------------------------")
-        print("  PARTICLE LOAD GENERATOR   ")
-        print("----------------------------")
+        if comm_rank == 0:
+            print("----------------------------")
+            print("  PARTICLE LOAD GENERATOR   ")
+            print("----------------------------")
 
         ts = TimeStamp()
         
@@ -128,7 +129,8 @@ class ParticleLoad:
         self.sim_box = self.initialize_sim_box()
         self.mask_data, self.centre = self.load_mask_file()
 
-        print("Computing simulation and (target) particle masses...")
+        if comm_rank:
+            print("Computing simulation and (target) particle masses...")
         self.compute_box_mass()
         self.get_target_resolution()
 
@@ -502,8 +504,9 @@ class ParticleLoad:
             n_gcells_equiv = int(np.rint(n_equiv_target / n_per_gcell))
             num_basepart_equiv = n_gcells_equiv**3 * zone1_gcell_load
 
-            print(f"Ideal base particle mass is {m_target:.3e} M_Sun, "
-                  f"corresponding to n_equiv = {n_equiv_target:.2f}.")
+            if comm_rank == 0:
+                print(f"Ideal base particle mass is {m_target:.3e} M_Sun, "
+                      f"corresponding to n_equiv = {n_equiv_target:.2f}.")
             
         else:
             m_target = self.sim_box['mass_msun'] / num_basepart_equiv
@@ -529,10 +532,12 @@ class ParticleLoad:
             np.rint(np.cbrt(num_basepart_equiv)))
 
         m_base = self.sim_box['mass_msun'] / num_basepart_equiv
-        print(f"Base resolution is {m_base:.3e} M_Sun, eqiv. to "
-              f"n = {self.sim_box['n_basepart_equiv']}^3 (full n = "
-              f"{self.sim_box['n_part_equiv']}^3)."
-        )
+
+        if comm_rank == 0:
+            print(f"Base resolution is {m_base:.3e} M_Sun, eqiv. to "
+                  f"n = {self.sim_box['n_basepart_equiv']}^3 (full n = "
+                  f"{self.sim_box['n_part_equiv']}^3)."
+            )
 
     def load_mask_file(self):
         """
@@ -1526,7 +1531,7 @@ class ParticleLoad:
                     f"   {neq / gcube['volume_mpc']:,.3f} particles cMpc^-3."
                 )       
 
-        print(f"Lowest gcell load is {lowest_gcell_load}.")
+            print(f"Lowest gcell load is {lowest_gcell_load}.")
         self.scube['lowest_equiv_n_in_gcube'] = np.cbrt(
             lowest_gcell_load * gcube['num_cells'])
 
@@ -2136,7 +2141,7 @@ class ParticleLoad:
                     f"geometric box centre!"
                 )
 
-        print(f"   Verification successful.")
+            print(f"   Verification successful.")
         ts.set_time('Final messages')
         #ts.print_time_usage('Finished verify_particles')
         
