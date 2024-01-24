@@ -115,9 +115,10 @@ class ParticleLoad:
 
         self.verbose = 1
 
-        print("----------------------------")
-        print("  PARTICLE LOAD GENERATOR   ")
-        print("----------------------------")
+        if comm_rank == 0:
+            print("----------------------------")
+            print("  PARTICLE LOAD GENERATOR   ")
+            print("----------------------------")
 
         ts = TimeStamp()
         
@@ -128,7 +129,8 @@ class ParticleLoad:
         self.sim_box = self.initialize_sim_box()
         self.mask_data, self.centre = self.load_mask_file()
 
-        print("Computing simulation and (target) particle masses...")
+        if comm_rank == 0:
+            print("Computing simulation and (target) particle masses...")
         self.compute_box_mass()
         self.get_target_resolution()
 
@@ -363,7 +365,6 @@ class ParticleLoad:
             'icgen_constraint_phase_descriptor2_levels': '%dummy',
             'icgen_constraint_phase_descriptor_path': '%dummy',
             'icgen_constraint_phase_descriptor2_path': '%dummy',
-            'icgen_powspec_dir': '../..',
 
             # System-specific parameters
             'slurm_partition': local['slurm_partition'],
@@ -503,8 +504,9 @@ class ParticleLoad:
             n_gcells_equiv = int(np.rint(n_equiv_target / n_per_gcell))
             num_basepart_equiv = n_gcells_equiv**3 * zone1_gcell_load
 
-            print(f"Ideal base particle mass is {m_target:.3e} M_Sun, "
-                  f"corresponding to n_equiv = {n_equiv_target:.2f}.")
+            if comm_rank == 0:
+                print(f"Ideal base particle mass is {m_target:.3e} M_Sun, "
+                      f"corresponding to n_equiv = {n_equiv_target:.2f}.")
             
         else:
             m_target = self.sim_box['mass_msun'] / num_basepart_equiv
@@ -530,10 +532,12 @@ class ParticleLoad:
             np.rint(np.cbrt(num_basepart_equiv)))
 
         m_base = self.sim_box['mass_msun'] / num_basepart_equiv
-        print(f"Base resolution is {m_base:.3e} M_Sun, eqiv. to "
-              f"n = {self.sim_box['n_basepart_equiv']}^3 (full n = "
-              f"{self.sim_box['n_part_equiv']}^3)."
-        )
+
+        if comm_rank == 0:
+            print(f"Base resolution is {m_base:.3e} M_Sun, eqiv. to "
+                  f"n = {self.sim_box['n_basepart_equiv']}^3 (full n = "
+                  f"{self.sim_box['n_part_equiv']}^3)."
+            )
 
     def load_mask_file(self):
         """
@@ -614,9 +618,11 @@ class ParticleLoad:
         else:
             mask_data = None
             centre = None
+            self.sim_box = None
 
         mask_data = comm.bcast(mask_data)
         centre = comm.bcast(centre)
+        self.sim_box = comm.bcast(self.sim_box)
 
         if comm_rank == 0:
             centre_mpc = centre * lbox_mpc 
@@ -1408,10 +1414,26 @@ class ParticleLoad:
         if np.min(gcell_info['num_cells'] < 0):
             raise ValueError(f"Negative entries in gcell_info['num_cells']...")
         num_gcells_processed = comm.reduce(np.sum(gcell_info['num_cells']))
-        if comm_rank == 0 and num_gcells_processed != gcell_types.shape[0]:
+        if comm_rank == 0 and num_gcells_processed != self.gcube['num_cells']:
             raise ValueError(
                 f"Processed {num_gcells_processed} gcells, but there are "
                 f"{self.gcube['num_cells']}!"
+            )
+
+        if comm_size > 1:
+            # Propagate num_parts_per_cell and num_baseparts_per_cell across
+            # ranks if we are using MPI
+            gcell_info['num_parts_per_cell'] = comm.allreduce(
+                gcell_info['num_parts_per_cell'],
+                lambda *x: np.max(x, axis=0)
+            )
+            gcell_info['num_baseparts_per_cell'] = comm.allreduce(
+                gcell_info['num_baseparts_per_cell'],
+                lambda *x: np.max(x, axis=0)
+            )
+            gcell_info['particle_masses'] = comm.allreduce(
+                gcell_info['particle_masses'],
+                lambda *x: np.max(x, axis=0)
             )
 
         # Gather total and global particle numbers
@@ -1501,7 +1523,7 @@ class ParticleLoad:
         # Find the particle number per dimension that would fill the gcube
         # at the highest and lowest resolutions
         lowest_gcell_load = comm.allreduce(gcell_load_range[0], op=MPI.MIN)
-        highest_gcell_load = comm.reduce(gcell_load_range[1], op=MPI.MAX)
+        highest_gcell_load = comm.allreduce(gcell_load_range[1], op=MPI.MAX)
         num_part_equiv_low = lowest_gcell_load * gcube['num_cells']
         num_part_equiv_high = highest_gcell_load * gcube['num_cells']
 
@@ -1525,7 +1547,7 @@ class ParticleLoad:
                     f"   {neq / gcube['volume_mpc']:,.3f} particles cMpc^-3."
                 )       
 
-        print(f"Lowest gcell load is {lowest_gcell_load}.")
+            print(f"Lowest gcell load is {lowest_gcell_load}.")
         self.scube['lowest_equiv_n_in_gcube'] = np.cbrt(
             lowest_gcell_load * gcube['num_cells'])
 
@@ -1643,7 +1665,13 @@ class ParticleLoad:
                     f"gcells of type {itype}, but found {ncell_type}!"
                 )
 
-            gcell_kernel_size = self.gcell_info['num_baseparts_per_cell'][itype]
+            # We don't have to do anything if there are no cells of this type
+            # (can happen when running on MPI)
+            if ncell_type == 0:
+                continue
+
+            gcell_kernel_size = (
+                self.gcell_info['num_baseparts_per_cell'][itype])
             gcell_load_type = self.gcell_info['num_parts_per_cell'][itype]
             particle_mass_type = self.gcell_info['particle_masses'][itype]
 
@@ -1765,7 +1793,7 @@ class ParticleLoad:
         glass_dir = self.config['glass_files_dir']
         
         for iitype, num_parts in enumerate(num_parts_per_gcell_type):
-            if num_parts in glass or num_parts == 0:
+            if num_parts in glass or num_parts <= 0:
                 continue
             if ((iitype == 0 and zone1_type != 'glass') or
                 (iitype > 0 and zone2_type != 'glass')):
@@ -2021,7 +2049,7 @@ class ParticleLoad:
         stime = time.time()
         npart_local = self.nparts['zone3_local']
         npart_all = self.nparts['zone3_all']
-        offset_zone3 = self.nparts['zone1_all'] + self.nparts['zone2_all']
+        offset_zone3 = self.nparts['zone1_local'] + self.nparts['zone2_local']
 
         # No zone III ==> no problem. This may also be the case for zooms.
         if npart_all == 0:
@@ -2135,7 +2163,7 @@ class ParticleLoad:
                     f"geometric box centre!"
                 )
 
-        print(f"   Verification successful.")
+            print(f"   Verification successful.")
         ts.set_time('Final messages')
         #ts.print_time_usage('Finished verify_particles')
         
@@ -2321,7 +2349,7 @@ class ParticleLoad:
         ts.set_time('Coordinate array shift')
         for idim in range(3):
             self.parts['pos'][: num_part_new, idim] = pf.repartition(
-            self.parts['pos'][:, idim], num_per_rank,
+            self.parts['pos'][: self.nparts['tot_local'], idim], num_per_rank,
             comm, comm_rank, comm_size
         )
         ts.set_time('Coordinate repartitioning')
@@ -2821,7 +2849,7 @@ class ParticleLoad:
         param_dict['icgen_cut_t1t2'] = cut_type1_type2
         param_dict['icgen_cut_t2t3'] = cut_type2_type3
         param_dict['icgen_linear_powspec_file'] = (
-            f"{extra_params['icgen_powspec_dir']}/"
+            f"{extra_params['icgen_powerspec_dir']}/"
             f"{self.cosmo['linear_powerspectrum_file']}"
         )
         param_dict['icgen_panphasian_descriptor'] = (
@@ -3323,7 +3351,8 @@ def centre_of_mass_mpi(coords, masses):
     #if comm_rank == 0:
     #    ts.print_time_usage('Finished centre_of_mass_mpi')
     
-    return np.array((com_x, com_y, com_z)) / m_tot
+    if comm_rank == 0:
+        return np.array((com_x, com_y, com_z)) / m_tot
 
 
 def get_cosmology_params(name):

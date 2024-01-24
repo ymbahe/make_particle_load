@@ -285,7 +285,7 @@ def set_up_rundir(args, params):
     if not os.path.isdir(run_dir):
         os.makedirs(run_dir)
 
-    if args.vrx is not None and not os.path.isdir(run_dir + '/logs'):
+    if args.vrx is not None and not os.path.isdir(run_dir + '/vr'):
         os.makedirs(run_dir + '/vr')
         
     copy(args.output_time_file, f"{run_dir}/output_times.dat")

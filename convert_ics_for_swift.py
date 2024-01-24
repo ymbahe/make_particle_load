@@ -272,7 +272,9 @@ def parse_arguments():
     )
     parser.add_argument(
         '-f', '--input_file_name',
-        help="The name of one of the IC files from IC_Gen."
+        help="[Optional] The name of one of the IC files from IC_Gen."
+             "By default, it is the name of the immediate working "
+             "directory plus '.0.hdf5'."
     )
     parser.add_argument(
         '-o', '--output_file_name',

@@ -56,12 +56,12 @@
  $cosmo_hubbleParam           Hubble_parameter  ! Redshift zero Hubble
  $ics_z_init            zshift         ! Redshift of the required displacement field
  ------------------------------------------------------------------------------
- # ********* Phases used: place the panphasian descriptor on the line below ***
- $icgen_panphasian_descriptor
- ------------------------------------------------------------------------------
- $icgen_p6_multipoles    ! Determine which multipoles to use for Panph6 descriptors only
- ------------------------------------------------------------------------------
- $icgen_is_constraint                             ! Number of constraint files to import
+# ********* Phases used: place the panphasian descriptor on the line below ***
+$icgen_panphasian_descriptor
+------------------------------------------------------------------------------
+$icgen_p6_multipoles    ! Determine which multipoles to use for Panph6 descriptors only
+------------------------------------------------------------------------------
+$icgen_is_constraint                             ! Number of constraint files to import
 #-------------- List constraint phase descriptors and (newline) file path, and levels to use
 $icgen_constraint_phase_descriptor
 $icgen_constraint_phase_descriptor_path
