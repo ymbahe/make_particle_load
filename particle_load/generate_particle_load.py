@@ -1649,6 +1649,11 @@ class ParticleLoad:
                     f"gcells of type {itype}, but found {ncell_type}!"
                 )
 
+            # We don't have to do anything if there are no cells of this type
+            # (can happen when running on MPI)
+            if ncell_type == 0:
+                continue
+
             gcell_kernel_size = self.gcell_info['num_baseparts_per_cell'][itype]
             gcell_load_type = self.gcell_info['num_parts_per_cell'][itype]
             particle_mass_type = self.gcell_info['particle_masses'][itype]
@@ -1771,7 +1776,7 @@ class ParticleLoad:
         glass_dir = self.config['glass_files_dir']
         
         for iitype, num_parts in enumerate(num_parts_per_gcell_type):
-            if num_parts in glass or num_parts == 0:
+            if num_parts in glass or num_parts <= 0:
                 continue
             if ((iitype == 0 and zone1_type != 'glass') or
                 (iitype > 0 and zone2_type != 'glass')):
