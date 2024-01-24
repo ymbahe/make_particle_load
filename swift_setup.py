@@ -119,6 +119,10 @@ def parse_arguments():
         help='Directory containing SWIFT tables for EAGLE-like runs '
              '(default: ../..).'
     )
+    parser.add_argument(
+        '-f', '--fixed_softening', action='store_true',
+        help="Do not automatically adjust softening parameters."
+    )
     
     
     args = parser.parse_args()
@@ -128,20 +132,25 @@ def parse_arguments():
         raise ValueError("Must specify the simulation type!")
 
     args.sim_type = args.sim_type.lower()
-    if args.sim_type not in ['dmo', 'eagle', 'colibre']:
+    if args.sim_type not in ['dmo', 'eagle', 'colibre', 'flamingo', 'flamingo-dmo']:
         raise ValueError(
-            "Simulation type '{args.sim_type}' is not (yet) supported.")
-    if args.swift_gas and args.sim_type not in ['eagle', 'colibre']:
+            f"Simulation type '{args.sim_type}' is not (yet) supported.")
+    if args.swift_gas and args.sim_type not in ['eagle', 'colibre', 'flamingo']:
         raise ValueError(
             f"Cannot run gas simulation with type '{args.sim_type}'!")
     
     if args.param_template is None:
         if args.sim_type == 'dmo':
             args.param_template = './swift_templates/params_dmo.yml'
+        elif args.sim_type == 'flamingo-dmo':
+            args.param_template = './swift_templates/params_flamingo_dmo.yml'
         elif args.sim_type == 'eagle':
             args.param_template = './swift_templates/params_eagle.yml'
         elif args.sim_type == 'colibre':
             args.param_template = './swift_templates/params_colibre.yml'
+        elif args.sim_type == 'flamingo':
+            args.param_template = './swift_templates/params_flamingo_x.yml'
+            
     if args.sim_name is None:
         args.sim_name = args.ics_file.split('/')[-1].replace('.hdf5', '')
     if args.run_time < 0.5:
@@ -186,7 +195,7 @@ def get_ic_metadata(args):
             if args.swift_gas:
                 raise ValueError(
                     "Cannot generate gas if it is already there!")
-            if args.sim_type not in ['eagle', 'colibre']:
+            if args.sim_type not in ['eagle', 'colibre', 'flamingo']:
                 raise ValueError(
                     "Cannot run simulations with gas in type "
                     f"'{args.sim_type}'!"
@@ -252,12 +261,14 @@ def compile_params(ic_data, args):
 
     params['swift_exec'] = './' + swift_exec
 
-    if args.sim_type in ['dmo', 'sibelius']:
+    if args.sim_type in ['dmo', 'sibelius', 'flamingo-dmo']:
         params['swift_flags'] = '--self-gravity'
     elif args.sim_type == 'eagle':
         params['swift_flags'] = '--eagle'
     elif args.sim_type == 'colibre':
         params['swift_flags'] = '--colibre --dust'
+    elif args.sim_type == 'flamingo':
+        params['swift_flags'] = '--flamingo'
         
     if args.sim_type == 'sibelius':
         params['swift_extra_flags'] = '--fof params.yml'
@@ -278,7 +289,7 @@ def set_up_rundir(args, params):
         os.makedirs(run_dir + '/vr')
         
     copy(args.output_time_file, f"{run_dir}/output_times.dat")
-    if args.sim_type in ['dmo', 'sibelius']:
+    if args.sim_type in ['dmo', 'sibelius', 'flamingo-dmo']:
         copy('./swift_templates/vrconfig_dmo.cfg',
              run_dir + '/vrconfig.cfg')
     elif params['is_zoom']:
@@ -289,7 +300,7 @@ def set_up_rundir(args, params):
     copy(args.exec_dir + '/' + params['swift_exec'], run_dir)
     if not os.path.isdir(run_dir + '/logs'):
         os.makedirs(run_dir + '/logs')
-
+    copy('./swift_templates/select_output.yml', run_dir)
     
 def generate_param_file(data, args):
     """Adapt and write the SWIFT parameter file."""
@@ -329,8 +340,9 @@ def generate_param_file(data, args):
     )
 
     # Base line: simplest case (only DM)
-    gravity['comoving_DM_softening'] = mean_ips * (1/20)
-    gravity['max_physical_DM_softening'] = mean_ips * (1/50)
+    if not args.fixed_softening:
+        gravity['comoving_DM_softening'] = mean_ips * (1/20)
+        gravity['max_physical_DM_softening'] = mean_ips * (1/50)
 
     # If we have gas in the ICs, need to adjust softenings
     if data['ics_have_gas']:
@@ -339,20 +351,24 @@ def generate_param_file(data, args):
         m_av /= (data['num_gas'] + data['num_dm'])
         f_dm = float(np.cbrt(data['m_dm'] / m_av))
         f_gas = float(np.cbrt(data['m_gas'] / m_av))
-        gravity['comoving_baryon_softening'] = mean_ips * f_gas * (1/20)
-        gravity['max_physical_baryon_softening'] = mean_ips * f_gas * (1/50)
-        gravity['comoving_DM_softening'] = mean_ips * f_dm * (1/20)
-        gravity['max_physical_DM_softening'] = mean_ips * f_dm * (1/50)
+
+        if not args.fixed_softening:
+            gravity['comoving_baryon_softening'] = mean_ips * f_gas * (1/20)
+            gravity['max_physical_baryon_softening'] = mean_ips * f_gas * (1/50)
+            gravity['comoving_DM_softening'] = mean_ips * f_dm * (1/20)
+            gravity['max_physical_DM_softening'] = mean_ips * f_dm * (1/50)
 
     # Finally, if we will generate gas later within SWIFT:
     if args.swift_gas:
         m_gas = float(data['m_pt1'] * data['OmegaBaryon'] / data['Omega0'])
         f_dm = float(np.cbrt(data['OmegaDM'] / data['Omega0']))
         f_gas = float(np.cbrt(data['OmegaBaryon'] / data['Omega0']))
-        gravity['comoving_baryon_softening'] = mean_ips * f_gas * (1/20)
-        gravity['max_physical_baryon_softening'] = mean_ips * f_gas * (1/50)
-        gravity['comoving_DM_softening'] = mean_ips * f_dm * (1/20)
-        gravity['max_physical_DM_softening'] = mean_ips * f_dm * (1/50)
+
+        if not args.fixed_softening:
+            gravity['comoving_baryon_softening'] = mean_ips * f_gas * (1/20)
+            gravity['max_physical_baryon_softening'] = mean_ips * f_gas * (1/50)
+            gravity['comoving_DM_softening'] = mean_ips * f_dm * (1/20)
+            gravity['max_physical_DM_softening'] = mean_ips * f_dm * (1/50)
         
     gravity['mesh_side_length'] = compute_mesh_side_length(data)
     if gravity['mesh_side_length'] > 1290 and args.num_nodes > 1:
@@ -373,12 +389,12 @@ def generate_param_file(data, args):
     ics['generate_gas_in_ics'] = 1 if args.swift_gas else 0
 
     # Need to clean up smoothing lengths even if gas is already in ICs
-    if args.sim_type in ['dmo', 'sibelius']:
+    if args.sim_type in ['dmo', 'sibelius', 'flamingo-dmo']:
         ics['cleanup_smoothing_lengths'] = 0
     else:
         ics['cleanup_smoothing_lengths'] = 1        
         
-    if args.sim_type in ['eagle', 'colibre']:
+    if args.sim_type in ['eagle', 'colibre', 'flamingo']:
         params['SPH']['particle_splitting_mass_threshold'] = float(m_gas * 4)
         print(f"Set splitting threshold to {m_gas * 4}")
         
@@ -390,7 +406,7 @@ def generate_param_file(data, args):
             args.table_dir + '/coolingtables/')
         params['EAGLEFeedback']['filename'] = (
             args.table_dir + '/yieldtables/')
-        params['EAGLEAGN']['min_gas_mass_for_nibbling'] = (
+        params['EAGLEAGN']['min_gas_mass_for_nibbling_Msun'] = (
             float(m_gas / 2) * 1e10)
         params['COLIBRECooling']['dir_name'] = (
             args.table_dir + '/UV_dust1_CR1_G1_shield1.hdf5')
@@ -402,11 +418,27 @@ def generate_param_file(data, args):
             args.table_dir + '/yieldtables/')
         params['COLIBREFeedback']['earlyfb_filename'] = (
             args.table_dir + '/Early_stellar_feedback.hdf5')
-        params['COLIBREAGN']['min_gas_mass_for_nibbling'] = (
+        params['COLIBREAGN']['min_gas_mass_for_nibbling_Msun'] = (
             float(m_gas / 2) * 1e10)
         params['COLIBRECooling']['dir_name'] = (
             args.table_dir + '/cooling_files_new')
-        
+
+    if args.sim_type in ['flamingo']:
+        params['COLIBRECooling']['dir_name'] = (
+            args.table_dir + '/UV_dust1_CR1_G1_shield1.hdf5')
+        params['EAGLEFeedback']['filename'] = (
+            args.table_dir + '/yieldtables/')
+        params['XrayEmissivity']['xray_table_path'] = (
+            args.table_dir + '/X_Ray_tables.hdf5')
+        params['EAGLEAGN']['min_gas_mass_for_nibbling_Msun'] = (
+            float(m_gas / 2) * 1e10)
+        params['Neutrino']['transfer_functions_filename'] = (
+            args.table_dir + '/neutrino_perturbations.hdf5')
+
+    if args.sim_type in ['flamingo-dmo']: 
+        params['Neutrino']['transfer_functions_filename'] = (
+            args.table_dir + '/neutrino_perturbations.hdf5')
+
         
     # Write the modified param file to the run dir.
     out_file = f"{args.run_dir}/params.yml"
@@ -438,7 +470,7 @@ def generate_postprocessing_scripts(data, args):
             'slurm_memory': data['slurm_memory'],
         }
         make_custom_copy(args.run_vr_template, vr_template_file, param_dict) 
-        copy(args.postprocess_file, args.run_dir/postprocess.sh)
+        copy(args.postprocess_file, f'{args.run_dir}/postprocess.sh')
         copy(args.vrx + '/stf', args.run_dir)
     
 def compute_top_level_cells(data):
