@@ -1093,7 +1093,7 @@ class ParticleLoad:
         self.nparts['tot_all'] += self.nparts['zone3_all']
 
     def find_scube_structure(self, target_n_cells, tolerance_n_cells=5,
-                             max_extra=10, eps=0.01):
+                             max_extra=10, eps=0.015):
         """
         Work out the optimal structure of the nested shell cube in Zone III.
     
@@ -3349,7 +3349,14 @@ def get_cosmology_params(name):
         cosmo['OmegaBaryon'] = 0.0486
         cosmo['hubbleParam'] = 0.681
         cosmo['sigma8'] = 0.807
-        cosmo['linear_powerspectrum_file'] = 'extended_planck_linear_powspec'
+        cosmo['linear_powerspectrum_file'] = 'power_spec_from_CLASS_colibre.txt'
+    elif name == 'DES3yr_neutrinos':
+        cosmo['Omega0'] = 0.306078
+        cosmo['OmegaLambda'] = 0.693922
+        cosmo['OmegaBaryon'] = 0.0486
+        cosmo['hubbleParam'] = 0.681
+        cosmo['sigma8'] = 0.807
+        cosmo['linear_powerspectrum_file'] = 'power_spec_from_CLASS_colibre.txt'       
     else:
         raise ValueError(f"Invalid cosmology '{name}'!")
 
