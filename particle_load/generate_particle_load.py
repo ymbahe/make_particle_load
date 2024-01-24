@@ -2033,7 +2033,7 @@ class ParticleLoad:
         stime = time.time()
         npart_local = self.nparts['zone3_local']
         npart_all = self.nparts['zone3_all']
-        offset_zone3 = self.nparts['zone1_all'] + self.nparts['zone2_all']
+        offset_zone3 = self.nparts['zone1_local'] + self.nparts['zone2_local']
 
         # No zone III ==> no problem. This may also be the case for zooms.
         if npart_all == 0:
