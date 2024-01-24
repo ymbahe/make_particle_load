@@ -1654,7 +1654,8 @@ class ParticleLoad:
             if ncell_type == 0:
                 continue
 
-            gcell_kernel_size = self.gcell_info['num_baseparts_per_cell'][itype]
+            gcell_kernel_size = (
+                self.gcell_info['num_baseparts_per_cell'][itype])
             gcell_load_type = self.gcell_info['num_parts_per_cell'][itype]
             particle_mass_type = self.gcell_info['particle_masses'][itype]
 
