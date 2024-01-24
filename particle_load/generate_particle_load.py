@@ -1420,6 +1420,22 @@ class ParticleLoad:
                 f"{self.gcube['num_cells']}!"
             )
 
+        if comm_size > 1:
+            # Propagate num_parts_per_cell and num_baseparts_per_cell across
+            # ranks if we are using MPI
+            gcell_info['num_parts_per_cell'] = comm.allreduce(
+                gcell_info['num_parts_per_cell'],
+                lambda *x: np.max(x, axis=0)
+            )
+            gcell_info['num_baseparts_per_cell'] = comm.allreduce(
+                gcell_info['num_baseparts_per_cell'],
+                lambda *x: np.max(x, axis=0)
+            )
+            gcell_info['particle_masses'] = comm.allreduce(
+                gcell_info['particle_masses'],
+                lambda *x: np.max(x, axis=0)
+            )
+
         # Gather total and global particle numbers
         num_parts_by_type = (
             gcell_info['num_cells'] * gcell_info['num_parts_per_cell'])
