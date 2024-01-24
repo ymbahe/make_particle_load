@@ -2333,7 +2333,7 @@ class ParticleLoad:
         ts.set_time('Coordinate array shift')
         for idim in range(3):
             self.parts['pos'][: num_part_new, idim] = pf.repartition(
-            self.parts['pos'][:, idim], num_per_rank,
+            self.parts['pos'][: self.nparts['tot_local'], idim], num_per_rank,
             comm, comm_rank, comm_size
         )
         ts.set_time('Coordinate repartitioning')
