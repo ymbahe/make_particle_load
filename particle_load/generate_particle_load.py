@@ -3335,7 +3335,8 @@ def centre_of_mass_mpi(coords, masses):
     #if comm_rank == 0:
     #    ts.print_time_usage('Finished centre_of_mass_mpi')
     
-    return np.array((com_x, com_y, com_z)) / m_tot
+    if comm_rank == 0:
+        return np.array((com_x, com_y, com_z)) / m_tot
 
 
 def get_cosmology_params(name):
