@@ -2320,10 +2320,19 @@ class ParticleLoad:
         # ** TODO **: move this to separate function prior to particle
         # generation. That way, we can immediately build the coordinate
         # arrays with the final size (if > locally generated size).
-        num_part_desired = int(num_part_all // comm_size)
-        num_part_leftover = num_part_all % comm_size
-        num_per_rank = np.zeros(comm_size, dtype=int) + num_part_desired
-        num_per_rank[: num_part_leftover] += 1
+
+        if num_part_all % comm_size == 0:
+            # all files have same number:
+            num_part_desired = num_part_all // comm_size
+            num_per_rank = np.ones(comm_size, dtype=int) * num_part_desired
+        else:
+            # one more particle per rank to guarantee some excess:
+            num_part_desired = num_part_all // comm_size + 1
+            # how many extra do we have:
+            num_part_extra = comm_size - num_part_all % comm_size
+            num_per_rank = np.ones(comm_size, dtype=int) * num_part_desired
+            # all files have same number except last, as required by ic_gen:
+            num_per_rank[-1] -= num_part_extra
         
         if comm_rank == 0:
             n_per_rank = num_per_rank[0]**(1/3.)
