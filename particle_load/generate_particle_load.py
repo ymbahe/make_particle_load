@@ -163,7 +163,8 @@ class ParticleLoad:
             ts.import_times(tss)
         ts.set_time('Save metadata')
 
-        ts.print_time_usage('Finished')
+        if comm_rank == 0:
+            ts.print_time_usage('Finished')
             
     def read_param_file(
             self, param_file: str, override_params: dict = None)-> None:
