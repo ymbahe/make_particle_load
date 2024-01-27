@@ -29,7 +29,13 @@ class SwiftICs:
         self.header = self.load_header(in_file)
         self.meta = self.load_meta_data(args)
         num_input_files = self.header['NumFilesPerSnapshot']
-        self.num_parts = self.header['NumPart_Total']
+        self.num_parts = [
+            n_type + 2**32 * hw_type
+            for n_type, hw_type in zip(
+                    self.header['NumPart_Total'],
+                    self.header["NumPart_Total_HighWord"]
+            )
+        ]
 
         print(f"Number of particles from IC-Gen:", self.num_parts)
         
