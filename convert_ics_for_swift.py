@@ -265,59 +265,98 @@ class SwiftICs:
 
             if self.args.isolate_gas:
                 pt0 = f.create_group("PartType0")
-                pt0.create_dataset("ParticleIDs", shape=(self.num_parts[0],), dtype=int)
                 pt0.create_dataset(
-                    "Coordinates", shape=(self.num_parts[0], 3), dtype=np.float64
+                    "ParticleIDs", shape=(self.num_parts[0],), dtype=int, chunks=True
                 )
                 pt0.create_dataset(
-                    "Velocities", shape=(self.num_parts[0], 3), dtype=np.float64
+                    "Coordinates",
+                    shape=(self.num_parts[0], 3),
+                    dtype=np.float64,
+                    chunks=True,
                 )
                 pt0.create_dataset(
-                    "Masses", shape=(self.num_parts[0],), dtype=np.float32
+                    "Velocities",
+                    shape=(self.num_parts[0], 3),
+                    dtype=np.float64,
+                    chunks=True,
                 )
                 pt0.create_dataset(
-                    "InternalEnergy", shape=(self.num_parts[0],), dtype=np.float64
+                    "Masses", shape=(self.num_parts[0],), dtype=np.float32, chunks=True
                 )
                 pt0.create_dataset(
-                    "SmoothingLength", shape=(self.num_parts[0],), dtype=np.float64
+                    "InternalEnergy",
+                    shape=(self.num_parts[0],),
+                    dtype=np.float64,
+                    chunks=True,
+                )
+                pt0.create_dataset(
+                    "SmoothingLength",
+                    shape=(self.num_parts[0],),
+                    dtype=np.float64,
+                    chunks=True,
                 )
                 if self.args.remap_ids:
                     pt0.create_dataset(
-                        "PeanoHilbertIDs", shape=(self.num_parts[0],), dtype=int
+                        "PeanoHilbertIDs",
+                        shape=(self.num_parts[0],),
+                        dtype=int,
+                        chunks=True,
                     )
 
             if self.num_parts[1] > 0:
                 pt1 = f.create_group("PartType1")
-                pt1.create_dataset("ParticleIDs", shape=(self.num_parts[1],), dtype=int)
                 pt1.create_dataset(
-                    "Coordinates", shape=(self.num_parts[1], 3), dtype=np.float64
+                    "ParticleIDs", shape=(self.num_parts[1],), dtype=int, chunks=True
                 )
                 pt1.create_dataset(
-                    "Velocities", shape=(self.num_parts[1], 3), dtype=np.float64
+                    "Coordinates",
+                    shape=(self.num_parts[1], 3),
+                    dtype=np.float64,
+                    chunks=True,
                 )
                 pt1.create_dataset(
-                    "Masses", shape=(self.num_parts[1],), dtype=np.float32
+                    "Velocities",
+                    shape=(self.num_parts[1], 3),
+                    dtype=np.float64,
+                    chunks=True,
+                )
+                pt1.create_dataset(
+                    "Masses", shape=(self.num_parts[1],), dtype=np.float32, chunks=True
                 )
                 if self.args.remap_ids:
                     pt1.create_dataset(
-                        "PeanoHilbertIDs", shape=(self.num_parts[1],), dtype=int
+                        "PeanoHilbertIDs",
+                        shape=(self.num_parts[1],),
+                        dtype=int,
+                        chunks=True,
                     )
 
             if self.num_parts[2] > 0:
                 pt2 = f.create_group("PartType2")
-                pt2.create_dataset("ParticleIDs", shape=(self.num_parts[2],), dtype=int)
                 pt2.create_dataset(
-                    "Coordinates", shape=(self.num_parts[2], 3), dtype=np.float64
+                    "ParticleIDs", shape=(self.num_parts[2],), dtype=int, chunks=True
                 )
                 pt2.create_dataset(
-                    "Velocities", shape=(self.num_parts[2], 3), dtype=np.float64
+                    "Coordinates",
+                    shape=(self.num_parts[2], 3),
+                    dtype=np.float64,
+                    chunks=True,
                 )
                 pt2.create_dataset(
-                    "Masses", shape=(self.num_parts[2],), dtype=np.float32
+                    "Velocities",
+                    shape=(self.num_parts[2], 3),
+                    dtype=np.float64,
+                    chunks=True,
+                )
+                pt2.create_dataset(
+                    "Masses", shape=(self.num_parts[2],), dtype=np.float32, chunks=True
                 )
                 if self.args.remap_ids:
                     pt2.create_dataset(
-                        "PeanoHilbertIDs", shape=(self.num_parts[2],), dtype=int
+                        "PeanoHilbertIDs",
+                        shape=(self.num_parts[2],),
+                        dtype=int,
+                        chunks=True,
                     )
 
     def save_particles(self, input_file):
