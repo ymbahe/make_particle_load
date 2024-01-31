@@ -49,7 +49,7 @@ class SwiftICs:
             out_file = ".".join(out_file_parts[:-2]) + ".hdf5"
         if out_dir is not None:
             out_file_name = out_file.split("/")[-1]
-            out_file = out_dir + "/" + out_file_name
+            out_file = os.path.join(out_dir, out_file_name)
         self.out_file = out_file
 
     def convert(self):
@@ -64,6 +64,9 @@ class SwiftICs:
                 self.remap_ids()
             self.save_particles(input_file)
         # finished, change filename to final output filename:
+        assert all(
+            [self.current_offset[k] == self.num_parts[k] for k in self.current_offset]
+        )
         os.rename(f"{self.out_file}.incomplete", f"{self.out_file}")
 
     def load_header(self, in_file):
@@ -106,7 +109,8 @@ class SwiftICs:
                         np.zeros(self.num_this_file, dtype="float32")
                         + self.header["MassTable"][ptype]
                     )
-                self.particle_buffer[ptype][prop] = g[prop][...]  # explicit read
+                else:
+                    self.particle_buffer[ptype][prop] = g[prop][...]  # explicit read
         return
 
     def load_meta_data(self):
@@ -140,6 +144,10 @@ class SwiftICs:
 
     def isolate_gas(self):
         """Isolate gas particles, if desired."""
+
+        if self.particle_buffer[1] is None:
+            self.particle_buffer[0] = None
+            return
 
         print("Separating DM and gas particles...")
         h = self.header["HubbleParam"]
@@ -224,7 +232,7 @@ class SwiftICs:
 
     def init_outfile(self):
         print(f"Initializing output file: {self.out_file}")
-        if self.isolate_gas:
+        if self.args.isolate_gas:
             h = self.header["HubbleParam"]
             with h5.File(self.args.pl_meta_file, "r") as f:
                 OmegaDM = f["Header"].attrs["OmegaDM"]
@@ -237,8 +245,8 @@ class SwiftICs:
             )
             self.num_parts[0] = ntype1_old - self.num_parts[1]
             print("Isolating gas particles:")
-            print(" Expect {self.num_parts[1]} DM type 1 particles")
-            print(" and {self.num_parts[0]} gas (type 0) particles.")
+            print(f" Expect {self.num_parts[1]} DM type 1 particles")
+            print(f" and {self.num_parts[0]} gas (type 0) particles.")
 
         with h5.File(f"{self.out_file}.incomplete", "w") as f:
             self.header["NumFilesPerSnapshot"] = 1
@@ -255,44 +263,72 @@ class SwiftICs:
                 if self.meta[key] is not None:
                     m.attrs[key] = self.meta[key]
 
-            if self.isolate_gas:
+            if self.args.isolate_gas:
                 pt0 = f.create_group("PartType0")
-                pt0.create_dataset("ParticleIDs", shape=(self.num_parts[0],))
-                pt0.create_dataset("Coordinates", shape=(self.num_parts[0], 3))
-                pt0.create_dataset("Velocities", shape=(self.num_parts[0], 3))
-                pt0.create_dataset("Masses", shape=(self.num_parts[0],))
-                pt0.create_dataset("InternalEnergy", shape=(self.num_parts[0],))
-                pt0.create_dataset("SmoothingLength", shape=(self.num_parts[0],))
-                if self.remap_ids:
-                    pt0.create_dataset("PeanoHilbertIDs", shape=(self.num_parts[0],))
+                pt0.create_dataset("ParticleIDs", shape=(self.num_parts[0],), dtype=int)
+                pt0.create_dataset(
+                    "Coordinates", shape=(self.num_parts[0], 3), dtype=np.float64
+                )
+                pt0.create_dataset(
+                    "Velocities", shape=(self.num_parts[0], 3), dtype=np.float64
+                )
+                pt0.create_dataset(
+                    "Masses", shape=(self.num_parts[0],), dtype=np.float32
+                )
+                pt0.create_dataset(
+                    "InternalEnergy", shape=(self.num_parts[0],), dtype=np.float64
+                )
+                pt0.create_dataset(
+                    "SmoothingLength", shape=(self.num_parts[0],), dtype=np.float64
+                )
+                if self.args.remap_ids:
+                    pt0.create_dataset(
+                        "PeanoHilbertIDs", shape=(self.num_parts[0],), dtype=int
+                    )
 
             if self.num_parts[1] > 0:
-                pt1 = f.create_group("PartType1", shape=(self.num_parts[1],))
-                pt1.create_dataset("ParticleIDs", shape=(self.num_parts[1],))
-                pt1.create_dataset("Coordinates", shape=(self.num_parts[1], 3))
-                pt1.create_dataset("Velocities", shape=(self.num_parts[1], 3))
-                pt1.create_dataset("Masses", shape=(self.num_parts[1],))
-                if self.remap_ids:
-                    pt1.create_dataset("PeanoHilbertIDs", shape=(self.num_parts[1],))
+                pt1 = f.create_group("PartType1")
+                pt1.create_dataset("ParticleIDs", shape=(self.num_parts[1],), dtype=int)
+                pt1.create_dataset(
+                    "Coordinates", shape=(self.num_parts[1], 3), dtype=np.float64
+                )
+                pt1.create_dataset(
+                    "Velocities", shape=(self.num_parts[1], 3), dtype=np.float64
+                )
+                pt1.create_dataset(
+                    "Masses", shape=(self.num_parts[1],), dtype=np.float32
+                )
+                if self.args.remap_ids:
+                    pt1.create_dataset(
+                        "PeanoHilbertIDs", shape=(self.num_parts[1],), dtype=int
+                    )
 
             if self.num_parts[2] > 0:
-                pt2 = f.create_group("PartType2", shape=(self.num_parts[2],))
-                pt2.create_dataset("ParticleIDs", shape=(self.num_parts[2],))
-                pt2.create_dataset("Coordinates", shape=(self.num_parts[2], 3))
-                pt2.create_dataset("Velocities", shape=(self.num_parts[2], 3))
-                pt2.create_dataset("Masses", shape=(self.num_parts[2],))
-                if self.remap_ids:
-                    pt2.create_dataset("PeanoHilbertIDs", shape=(self.num_parts[2],))
+                pt2 = f.create_group("PartType2")
+                pt2.create_dataset("ParticleIDs", shape=(self.num_parts[2],), dtype=int)
+                pt2.create_dataset(
+                    "Coordinates", shape=(self.num_parts[2], 3), dtype=np.float64
+                )
+                pt2.create_dataset(
+                    "Velocities", shape=(self.num_parts[2], 3), dtype=np.float64
+                )
+                pt2.create_dataset(
+                    "Masses", shape=(self.num_parts[2],), dtype=np.float32
+                )
+                if self.args.remap_ids:
+                    pt2.create_dataset(
+                        "PeanoHilbertIDs", shape=(self.num_parts[2],), dtype=int
+                    )
 
     def save_particles(self, input_file):
         """Write the data to a SWIFT-compatible single file."""
 
         print(f"Writing particles from file {input_file} to {self.out_file}...")
-        with h5.File(f"{self.out_file}.incomplete", "w") as f:
+        with h5.File(f"{self.out_file}.incomplete", "r+") as f:
             for ptype in (0, 1, 2):
                 if self.particle_buffer[ptype] is None:
                     continue
-                ntype_this_file = self.particle_buffer[ptype]["ParticleIDs"].size
+                ntype_this_file = self.particle_buffer[ptype]["Masses"].size
                 for field in self.particle_buffer[ptype]:
                     if field in ("Coordinates", "Velocities"):
                         dest_sel = np.s_[
@@ -310,7 +346,7 @@ class SwiftICs:
                         dest_sel=dest_sel,
                     )
                 self.current_offset[ptype] += ntype_this_file
-            raise NotImplementedError
+                self.particle_buffer[ptype] = None
 
 
 def parse_arguments():
@@ -361,9 +397,9 @@ def parse_arguments():
 
     if args.input_file_name is None:
         sim_name = args.workdir.split("/")[-1]
-        args.input_file_name = args.workdir + "/ICs/" + sim_name + ".0.hdf5"
+        args.input_file_name = os.path.join(args.workdir, "ICs", f"{sim_name}.0.hdf5")
     if args.pl_meta_file is None:
-        args.pl_meta_file = args.workdir + "/particle_load_info.hdf5"
+        args.pl_meta_file = os.path.join(args.workdir, "particle_load_info.hdf5")
 
     # Some sanity checks
     if not os.path.isfile(args.pl_meta_file):
