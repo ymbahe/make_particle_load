@@ -350,6 +350,7 @@ def generate_param_file(data, args):
     # If we have gas in the ICs, need to adjust softenings
     if data['ics_have_gas']:
         m_gas = float(data['m_gas'])
+        data['m_dm'] = data['m_pt1']
         m_av = data['m_gas'] * data['num_gas'] + data['m_dm'] * data['num_dm']
         m_av /= (data['num_gas'] + data['num_dm'])
         f_dm = float(np.cbrt(data['m_dm'] / m_av))
