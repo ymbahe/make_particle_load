@@ -207,6 +207,9 @@ def get_ic_metadata(args):
         data['m_pt1'] = f['PartType1']['Masses'][0] / data['HubbleParam']
         print(f"Read PT1 mass as {data['m_pt1']}")
 
+	data['m_pt0'] = f['PartType0']['Masses'][0] / data['HubbleParam']
+	print(f"Read gas (PT0) mass as {data['m_gas']}"
+
         data['is_zoom'] = h.attrs['NumPart_Total'][2] > 0
 
     set_default(data, 'dm_to_baryon_mass_ratio',
