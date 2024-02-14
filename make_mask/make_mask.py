@@ -1434,7 +1434,7 @@ class MakeMask:
 
         fig, axarr = plt.subplots(1, 3, figsize=(13, 4))
 
-        if (hist_fill > 0).any():
+        if (hist_full > 0).any():
             ind_filled = np.nonzero(hist_full > 0)
             vmin, vmax = np.percentile(hist_full[ind_filled], [0.1, 99.99])
         else:
