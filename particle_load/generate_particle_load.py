@@ -2327,13 +2327,14 @@ class ParticleLoad:
             num_part_desired = num_part_all // comm_size
             num_per_rank = np.ones(comm_size, dtype=int) * num_part_desired
         else:
-            # one more particle per rank to guarantee some excess:
-            num_part_desired = num_part_all // comm_size + 1
+            # distribute evenly as much as possible:
+            num_part_desired = num_part_all // comm_size
             # how many extra do we have:
-            num_part_extra = comm_size - num_part_all % comm_size
+            num_part_extra = num_part_all % comm_size
             num_per_rank = np.ones(comm_size, dtype=int) * num_part_desired
-            # all files have same number except last, as required by ic_gen:
-            num_per_rank[-1] -= num_part_extra
+            # all files have same number except last, and last file has excess
+            # particles, as required by ic_gen:
+            num_per_rank[-1] += num_part_extra
         
         if comm_rank == 0:
             n_per_rank = num_per_rank[0]**(1/3.)
@@ -2344,9 +2345,9 @@ class ParticleLoad:
                 f"   {num_part_min} to {num_part_max} particles."
             )
         ts.set_time('Setup')
-            
+
         self.parts['m'] = pf.repartition(
-            self.parts['m'], num_per_rank, comm, comm_rank, comm_size) 
+            self.parts['m'], num_per_rank, comm, comm_rank, comm_size)
         ts.set_time('Mass repartitioning')
         num_part_new = len(self.parts['m'])
 
@@ -2727,7 +2728,7 @@ class ParticleLoad:
         num_max_disp = int(self.extra_params['icgen_nmaxdisp'])
 
         n_dim_fft = fft_params['n_mesh']
-        num_cores_per_node = self.extra_params['num_cores_per_node']
+        num_cores_per_node = int(self.extra_params['num_cores_per_node'])
 
         # Find number of cores that satisfies both FFT and particle constraints
         # Checking both independently may seem counter-intuitive, but is
