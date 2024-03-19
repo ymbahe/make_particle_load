@@ -207,6 +207,10 @@ def get_ic_metadata(args):
         data['m_pt1'] = f['PartType1']['Masses'][0] / data['HubbleParam']
         print(f"Read PT1 mass as {data['m_pt1']}")
 
+        if data['is_hydro']:
+            data['m_gas'] = f['PartType0']['Masses'][0] / data['HubbleParam']
+            print(f"Read gas (PT0) mass as {data['m_gas']}")
+
         data['is_zoom'] = h.attrs['NumPart_Total'][2] > 0
 
     set_default(data, 'dm_to_baryon_mass_ratio',
@@ -347,6 +351,7 @@ def generate_param_file(data, args):
     # If we have gas in the ICs, need to adjust softenings
     if data['ics_have_gas']:
         m_gas = float(data['m_gas'])
+        data['m_dm'] = data['m_pt1']
         m_av = data['m_gas'] * data['num_gas'] + data['m_dm'] * data['num_dm']
         m_av /= (data['num_gas'] + data['num_dm'])
         f_dm = float(np.cbrt(data['m_dm'] / m_av))
