@@ -81,7 +81,6 @@ class SwiftICs:
                     "MassTable",
                     "NumFilesPerSnapshot",
                     "NumPart_Total",
-                    "NumPart_Total_HighWord",
                     "Time",
                     "HubbleParam",
                 ]:
@@ -252,6 +251,7 @@ class SwiftICs:
             self.header["NumFilesPerSnapshot"] = 1
             self.header["NumPart_ThisFile"] = self.num_parts
             self.header["NumPart_Total"] = self.num_parts
+            self.header["NumPart_Total_HighWord"] = [0 for _ in self.num_parts]
 
             h = f.create_group("Header")
             for key in self.header:
