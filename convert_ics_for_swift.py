@@ -247,12 +247,12 @@ class SwiftICs:
             print(f" Expect {self.num_parts[1]} DM type 1 particles")
             print(f" and {self.num_parts[0]} gas (type 0) particles.")
 
-        with h5.File(f"{self.out_file}.incomplete", "w") as f:
-            self.header["NumFilesPerSnapshot"] = 1
-            self.header["NumPart_ThisFile"] = self.num_parts
-            self.header["NumPart_Total"] = self.num_parts
-            self.header["NumPart_Total_HighWord"] = [0 for _ in self.num_parts]
+        self.header["NumFilesPerSnapshot"] = 1
+        self.header["NumPart_ThisFile"] = self.num_parts
+        self.header["NumPart_Total"] = [np % 2**32 for np in self.num_parts]
+        self.header["NumPart_Total_HighWord"] = [np // 2**32 for np in self.num_parts]
 
+        with h5.File(f"{self.out_file}.incomplete", "w") as f:
             h = f.create_group("Header")
             for key in self.header:
                 h.attrs[key] = self.header[key]
